@@ -10,6 +10,7 @@
 #include <functional>
 
 #include "board.h"
+#include "AudioNoiseSuppressor.h"
 
 #define AUDIO_CODEC_DMA_DESC_NUM 6
 #define AUDIO_CODEC_DMA_FRAME_NUM 240
@@ -39,6 +40,17 @@ public:
     inline bool input_enabled() const { return input_enabled_; }
     inline bool output_enabled() const { return output_enabled_; }
 
+    void DynamicAGCWithNoiseSuppression(int16_t* data, int size);
+    void DynamicAGC(int16_t* data, int size);
+    void ApplyOutputGain(int16_t* data, int samples);
+
+    AudioNoiseSuppressor noise_suppressor_;
+
+    // 添加回调设置接口，为了解决声音突然调大时，afe错误的问题
+    void SetHardwareStateChangeCallback(std::function<void()> callback) {
+        hw_state_change_callback_ = std::move(callback);
+    }
+
 protected:
     i2s_chan_handle_t tx_handle_ = nullptr;
     i2s_chan_handle_t rx_handle_ = nullptr;
@@ -53,6 +65,10 @@ protected:
     int output_channels_ = 1;
     int output_volume_ = 70;
     float input_gain_ = 0.0;
+    float output_gain_ = 0.0;
+
+    // 添加回调设置接口，为了解决声音突然调大时，afe错误的问题
+    std::function<void()> hw_state_change_callback_;
 
     virtual int Read(int16_t* dest, int samples) = 0;
     virtual int Write(const int16_t* data, int samples) = 0;

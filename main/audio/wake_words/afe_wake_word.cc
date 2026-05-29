@@ -29,6 +29,18 @@ AfeWakeWord::~AfeWakeWord() {
         heap_caps_free(wake_word_encode_task_buffer_);
     }
 
+    // 释放音频检测任务栈内存
+    if (detection_task_stack_ != nullptr) {
+        heap_caps_free(detection_task_stack_);
+        detection_task_stack_ = nullptr;
+    }
+    
+    // 释放音频检测任务控制块内存
+    if (detection_task_buffer_ != nullptr) {
+        heap_caps_free(detection_task_buffer_);
+        detection_task_buffer_ = nullptr;
+    }
+
     if (models_ != nullptr) {
         esp_srmodel_deinit(models_);
     }
@@ -81,12 +93,44 @@ bool AfeWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) {
     afe_iface_ = esp_afe_handle_from_config(afe_config);
     afe_data_ = afe_iface_->create_from_config(afe_config);
 
+#if 0
     xTaskCreate([](void* arg) {
         auto this_ = (AfeWakeWord*)arg;
         this_->AudioDetectionTask();
         vTaskDelete(NULL);
     }, "audio_detection", 4096, this, 3, nullptr);
+#endif
 
+#if 1
+    // 定义音频检测任务栈大小
+    const size_t detection_stack_size = 4096;
+
+    // 分配音频检测任务栈内存
+    detection_task_stack_ = (StackType_t*)heap_caps_malloc(detection_stack_size * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
+    assert(detection_task_stack_ != nullptr);
+    
+    // 分配音频检测任务控制块内存
+    detection_task_buffer_ = (StaticTask_t*)heap_caps_malloc(sizeof(StaticTask_t), MALLOC_CAP_INTERNAL);
+    assert(detection_task_buffer_ != nullptr);
+
+    // 创建音频检测任务（静态方式）
+    detection_task_handle_ = xTaskCreateStatic(
+        [](void* arg) {
+            auto this_ = (AfeWakeWord*)arg;
+            this_->AudioDetectionTask();
+        },
+        "audio_detection",
+        detection_stack_size,
+        this,
+        3,
+        detection_task_stack_,
+        detection_task_buffer_
+    );
+
+    assert(detection_task_handle_ != nullptr);
+
+    ESP_LOGI(TAG, "Audio detection task created successfully using static allocation");
+#endif
     return true;
 }
 
@@ -205,4 +249,11 @@ bool AfeWakeWord::GetWakeWordOpus(std::vector<uint8_t>& opus) {
     opus.swap(wake_word_opus_.front());
     wake_word_opus_.pop_front();
     return !opus.empty();
+}
+
+void AfeWakeWord::Reset() {
+    if (afe_data_) {
+        afe_iface_->reset_buffer(afe_data_);
+        ESP_LOGI(TAG, "AFE wake word buffer reset");
+    }
 }

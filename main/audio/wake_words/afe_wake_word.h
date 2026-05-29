@@ -33,6 +33,7 @@ public:
     void EncodeWakeWordData();
     bool GetWakeWordOpus(std::vector<uint8_t>& opus);
     const std::string& GetLastDetectedWakeWord() const { return last_detected_wake_word_; }
+    void Reset();
 
 private:
     srmodel_list_t *models_ = nullptr;
@@ -52,6 +53,11 @@ private:
     std::deque<std::vector<uint8_t>> wake_word_opus_;
     std::mutex wake_word_mutex_;
     std::condition_variable wake_word_cv_;
+
+    // 音频检测任务栈和控制块内存（静态分配）
+    StackType_t* detection_task_stack_ = nullptr;
+    StaticTask_t* detection_task_buffer_ = nullptr;
+    TaskHandle_t detection_task_handle_ = nullptr;
 
     void StoreWakeWordData(const int16_t* data, size_t size);
     void AudioDetectionTask();

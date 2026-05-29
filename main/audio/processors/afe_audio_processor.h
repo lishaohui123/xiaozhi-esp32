@@ -27,6 +27,7 @@ public:
     void OnVadStateChange(std::function<void(bool speaking)> callback) override;
     size_t GetFeedSize() override;
     void EnableDeviceAec(bool enable) override;
+    void Reset() override;
 
 private:
     EventGroupHandle_t event_group_ = nullptr;
@@ -38,6 +39,11 @@ private:
     int frame_samples_ = 0;
     bool is_speaking_ = false;
     std::vector<int16_t> output_buffer_;
+
+    // 静态任务相关成员变量
+    StackType_t* task_stack_ = nullptr;
+    StaticTask_t* task_buffer_ = nullptr;
+    TaskHandle_t task_handle_ = nullptr;
 
     void AudioProcessorTask();
 };

@@ -30,7 +30,11 @@ public:
     const std::string& GetActivationMessage() const { return activation_message_; }
     const std::string& GetActivationCode() const { return activation_code_; }
     std::string GetCheckVersionUrl();
+	std::unique_ptr<Http> SetupHttp();
 
+    esp_err_t SendActivationCode(const std::string& deviceId, const std::string& activationCode);
+
+    esp_err_t SendActivationCode(const std::string& deviceId);
 private:
     std::string activation_message_;
     std::string activation_code_;
@@ -52,7 +56,7 @@ private:
     std::vector<int> ParseVersion(const std::string& version);
     bool IsNewVersionAvailable(const std::string& currentVersion, const std::string& newVersion);
     std::string GetActivationPayload();
-    std::unique_ptr<Http> SetupHttp();
+    
 };
 
 #endif // _OTA_H

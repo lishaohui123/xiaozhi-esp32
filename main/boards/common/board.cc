@@ -4,6 +4,7 @@
 #include "display/display.h"
 #include "display/oled_display.h"
 #include "assets/lang_config.h"
+#include "esp32_music.h"
 
 #include <esp_log.h>
 #include <esp_ota_ops.h>
@@ -62,6 +63,15 @@ Camera* Board::GetCamera() {
     return nullptr;
 }
 
+Music* Board::GetMusic() {
+    return nullptr;
+}
+
+Motor *Board::GetMotor() { return nullptr; }
+
+IOT *Board::GetIOT() {
+    return nullptr;
+}
 Led* Board::GetLed() {
     static NoLed led;
     return &led;
@@ -156,19 +166,19 @@ std::string Board::GetSystemInfoJson() {
     json += R"(},)";
 
     // Append display info
-    auto display = GetDisplay();
-    if (display) {
-        json += R"("display":{)";
-        if (dynamic_cast<OledDisplay*>(display)) {
-            json += R"("monochrome":)" + std::string("true") + R"(,)";
-        } else {
-            json += R"("monochrome":)" + std::string("false") + R"(,)";
-        }
-        json += R"("width":)" + std::to_string(display->width()) + R"(,)";
-        json += R"("height":)" + std::to_string(display->height()) + R"(,)";
-        json.pop_back(); // Remove the last comma
-    }
-    json += R"(},)";
+    // auto display = GetDisplay();
+    // if (display) {
+    //     json += R"("display":{)";
+    //     if (dynamic_cast<OledDisplay*>(display)) {
+    //         json += R"("monochrome":)" + std::string("true") + R"(,)";
+    //     } else {
+    //         json += R"("monochrome":)" + std::string("false") + R"(,)";
+    //     }
+    //     json += R"("width":)" + std::to_string(display->width()) + R"(,)";
+    //     json += R"("height":)" + std::to_string(display->height()) + R"(,)";
+    //     json.pop_back(); // Remove the last comma
+    // }
+    // json += R"(},)";
 
     json += R"("board":)" + GetBoardJson();
 

@@ -13,6 +13,9 @@
 #include "backlight.h"
 #include "camera.h"
 #include "assets.h"
+#include "music.h"
+#include "motor.h"
+#include "iot/iot.h"
 
 /**
  * Network events for unified callback
@@ -73,6 +76,9 @@ public:
     virtual bool GetTemperature(float& esp32temp);
     virtual Display* GetDisplay();
     virtual Camera* GetCamera();
+    virtual Music *GetMusic();
+    virtual Motor *GetMotor();
+    virtual IOT* GetIOT();
     virtual NetworkInterface* GetNetwork() = 0;
     virtual void StartNetwork() = 0;
     virtual void SetNetworkEventCallback(NetworkEventCallback callback) { (void)callback; }

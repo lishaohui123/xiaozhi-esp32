@@ -9,6 +9,8 @@ set(PROJECT_VER "2.1.0")
 # Add this line to disable the specific warning
 add_compile_options(-Wno-missing-field-initializers)
 
+include_directories(${CMAKE_SOURCE_DIR})
+
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(xiaozhi)
 

@@ -3,6 +3,7 @@
 #include <esp_log.h>
 #include <driver/i2c_master.h>
 #include <driver/i2s_tdm.h>
+#include <math.h> //添加这行头文件包含
 
 #define TAG "BoxAudioCodec"
 
@@ -14,7 +15,7 @@ BoxAudioCodec::BoxAudioCodec(void* i2c_master_handle, int input_sample_rate, int
     input_channels_ = input_reference_ ? 2 : 1; // 输入通道数
     input_sample_rate_ = input_sample_rate;
     output_sample_rate_ = output_sample_rate;
-    input_gain_ = 30;
+    input_gain_ = 35;
 
     CreateDuplexChannels(mclk, bclk, ws, dout, din);
 
@@ -199,6 +200,7 @@ void BoxAudioCodec::EnableInput(bool enable) {
         };
         if (input_reference_) {
             fs.channel_mask |= ESP_CODEC_DEV_MAKE_CHANNEL_MASK(1);
+            // fs.channel_mask |= ESP_CODEC_DEV_MAKE_CHANNEL_MASK(1) | ESP_CODEC_DEV_MAKE_CHANNEL_MASK(2) | ESP_CODEC_DEV_MAKE_CHANNEL_MASK(3);
         }
         ESP_ERROR_CHECK(esp_codec_dev_open(input_dev_, &fs));
         ESP_ERROR_CHECK(esp_codec_dev_set_in_channel_gain(input_dev_, ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0), input_gain_));
@@ -230,10 +232,32 @@ void BoxAudioCodec::EnableOutput(bool enable) {
     AudioCodec::EnableOutput(enable);
 }
 
+#if 0
 int BoxAudioCodec::Read(int16_t* dest, int samples) {
     if (input_enabled_) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_read(input_dev_, (void*)dest, samples * sizeof(int16_t)));
     }
+    // Printsimplestrength(dest, samples, 4);
+    return samples;
+}
+#endif
+
+// 为了解决在最大音量播放音乐时，读取出现错误的问题
+int BoxAudioCodec::Read(int16_t* dest, int samples) {
+    if (input_enabled_) {
+        esp_err_t ret = esp_codec_dev_read(input_dev_, (void*)dest, samples * sizeof(int16_t));
+        if (ret != ESP_OK) {
+            // 发生错误时，填充静音数据并返回 samples，避免上层处理异常数据
+            memset(dest, 0, samples * sizeof(int16_t));
+            ESP_LOGW(TAG, "Read failed, filled silence: %d samples, err: %s", samples, esp_err_to_name(ret));
+
+            // 可选：尝试复位输入设备
+            // esp_codec_dev_close(input_dev_);
+            // vTaskDelay(pdMS_TO_TICKS(10));
+            // esp_codec_dev_open(input_dev_, ...);
+        }
+    }
+
     return samples;
 }
 
@@ -242,4 +266,24 @@ int BoxAudioCodec::Write(const int16_t* data, int samples) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_write(output_dev_, (void*)data, samples * sizeof(int16_t)));
     }
     return samples;
+}
+
+void BoxAudioCodec::Printsimplestrength(const int16_t* data, int samples, int channels) {
+    int frames = samples / channels;
+    if (frames <= 0) return;
+    
+    for (int ch = 0; ch < channels; ch++) {
+        double sum_sq = 0.0;
+        int16_t peak = 0;
+
+            for (int i= 0; i< frames; i++) {
+                int16_t sample = data[i * channels + ch];
+                sum_sq += sample * sample;
+                int16_t abs_sample = abs(sample);
+                if (abs_sample > peak) peak = abs_sample;
+            }
+            double rms = sqrt(sum_sq / frames);
+            printf("CH%d: RMS=%.1f, Peak=%d | ", ch, rms, peak);
+    }
+    printf("\n");
 }

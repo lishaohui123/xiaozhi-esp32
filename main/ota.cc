@@ -2,6 +2,7 @@
 #include "system_info.h"
 #include "settings.h"
 #include "assets/lang_config.h"
+#include "constants.h"
 
 #include <cJSON.h>
 #include <esp_log.h>
@@ -18,6 +19,7 @@
 #include <vector>
 #include <sstream>
 #include <algorithm>
+#include "constants.h"
 
 #define TAG "Ota"
 
@@ -41,11 +43,15 @@ Ota::~Ota() {
 }
 
 std::string Ota::GetCheckVersionUrl() {
+#if 0
     Settings settings("wifi", false);
     std::string url = settings.GetString("ota_url");
     if (url.empty()) {
-        url = CONFIG_OTA_URL;
+        url = CONFIG_OTA_URI;
     }
+    return url;
+#endif
+    std::string url = CONFIG_OTA_URI;
     return url;
 }
 
@@ -64,6 +70,7 @@ std::unique_ptr<Http> Ota::SetupHttp() {
     http->SetHeader("User-Agent", user_agent);
     http->SetHeader("Accept-Language", Lang::CODE);
     http->SetHeader("Content-Type", "application/json");
+    http->SetHeader("token", ACCESS_TOKEN);
 
     return http;
 }
@@ -469,5 +476,63 @@ esp_err_t Ota::Activate() {
     }
 
     ESP_LOGI(TAG, "Activation successful");
+    return ESP_OK;
+}
+
+esp_err_t Ota::SendActivationCode(const std::string& deviceId, const std::string& activationCode) {
+    // std::string url = GetCheckVersionUrl();
+    std::string url = OTA_URI;
+    if (url.back() != '/') {
+        url += "/device/deviceCode?deviceId=" + deviceId + "&deviceCode=" + activationCode;
+    } else {
+        url += "device/deviceCode?deviceId=" + deviceId + "&deviceCode=" + activationCode;
+    }
+
+    auto http = SetupHttp();
+
+    if (!http->Open("GET", url)) {
+        ESP_LOGE(TAG, "Failed to open HTTP connection");
+        return ESP_FAIL;
+    }
+    
+    auto status_code = http->GetStatusCode();
+    if (status_code == 202) {
+        return ESP_ERR_TIMEOUT;
+    }
+    if (status_code != 200) {
+        ESP_LOGE(TAG, "Failed to send activate code, code: %d, body: %s", status_code, http->ReadAll().c_str());
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "Send activation code successful");
+    return ESP_OK;
+}
+
+esp_err_t Ota::SendActivationCode(const std::string& deviceId) {
+    // std::string url = GetCheckVersionUrl();
+    std::string url = OTA_URI;
+    if (url.back() != '/') {
+        url += "/device/bind?deviceId=" + deviceId;
+    } else {
+        url += "device/bind?deviceId=" + deviceId;
+    }
+
+    auto http = SetupHttp();
+
+    if (!http->Open("GET", url)) {
+        ESP_LOGE(TAG, "Failed to open HTTP connection");
+        return ESP_FAIL;
+    }
+    
+    auto status_code = http->GetStatusCode();
+    if (status_code == 202) {
+        return ESP_ERR_TIMEOUT;
+    }
+    if (status_code != 200) {
+        ESP_LOGE(TAG, "Failed to send activate code, code: %d, body: %s", status_code, http->ReadAll().c_str());
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "Send activation code successful");
     return ESP_OK;
 }

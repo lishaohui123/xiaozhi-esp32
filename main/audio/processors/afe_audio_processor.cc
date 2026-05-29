@@ -40,7 +40,8 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srm
     afe_config_t* afe_config = afe_config_init(input_format.c_str(), NULL, AFE_TYPE_VC, AFE_MODE_HIGH_PERF);
     afe_config->aec_mode = AEC_MODE_VOIP_HIGH_PERF;
     afe_config->vad_mode = VAD_MODE_0;
-    afe_config->vad_min_noise_ms = 100;
+    // afe_config->vad_min_noise_ms = 100;
+    afe_config->vad_min_noise_ms = 20;
     if (vad_model_name != nullptr) {
         afe_config->vad_model_name = vad_model_name;
     }
@@ -67,17 +68,51 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srm
     afe_iface_ = esp_afe_handle_from_config(afe_config);
     afe_data_ = afe_iface_->create_from_config(afe_config);
     
-    xTaskCreate([](void* arg) {
-        auto this_ = (AfeAudioProcessor*)arg;
-        this_->AudioProcessorTask();
-        vTaskDelete(NULL);
-    }, "audio_communication", 4096, this, 3, NULL);
+    // 使用静态任务创建方式
+    const size_t stack_size = 4096;
+    
+    // 分配任务栈内存
+    task_stack_ = (StackType_t*)heap_caps_malloc(stack_size * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
+    assert(task_stack_ != nullptr);
+    
+    // 分配任务控制块内存
+    task_buffer_ = (StaticTask_t*)heap_caps_malloc(sizeof(StaticTask_t), MALLOC_CAP_INTERNAL);
+    assert(task_buffer_ != nullptr);
+    
+    // 创建静态任务
+    task_handle_ = xTaskCreateStatic(
+        [](void* arg) {
+            auto this_ = (AfeAudioProcessor*)arg;
+            this_->AudioProcessorTask();
+            vTaskDelete(NULL);
+        },
+        "audio_communication",
+        stack_size,
+        this,
+        3,
+        task_stack_,
+        task_buffer_
+    );
+
+    assert(task_handle_ != nullptr);
 }
 
 AfeAudioProcessor::~AfeAudioProcessor() {
     if (afe_data_ != nullptr) {
         afe_iface_->destroy(afe_data_);
     }
+    
+    // 释放静态任务相关内存
+    if (task_stack_ != nullptr) {
+        heap_caps_free(task_stack_);
+        task_stack_ = nullptr;
+    }
+    
+    if (task_buffer_ != nullptr) {
+        heap_caps_free(task_buffer_);
+        task_buffer_ = nullptr;
+    }
+    
     vEventGroupDelete(event_group_);
 }
 
@@ -167,6 +202,8 @@ void AfeAudioProcessor::AudioProcessorTask() {
                     output_callback_(std::vector<int16_t>(output_buffer_.begin(), output_buffer_.begin() + frame_samples_));
                     output_buffer_.erase(output_buffer_.begin(), output_buffer_.begin() + frame_samples_);
                 }
+                // 为了防止采集过快，后续任务不能及时发送，这里加延时
+                // vTaskDelay(pdMS_TO_TICKS(2));
             }
         }
     }
@@ -183,5 +220,12 @@ void AfeAudioProcessor::EnableDeviceAec(bool enable) {
     } else {
         afe_iface_->disable_aec(afe_data_);
         afe_iface_->enable_vad(afe_data_);
+    }
+}
+
+void AfeAudioProcessor::Reset() {
+    if (afe_data_) {
+        afe_iface_->reset_buffer(afe_data_);
+        ESP_LOGI(TAG, "AFE audio processor buffer reset");
     }
 }

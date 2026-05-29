@@ -1,5 +1,7 @@
 #include "wifi_board.h"
 #include "codecs/es8388_audio_codec.h"
+#include "codecs/es8311_audio_codec.h"
+#include "codecs/box_audio_codec.h"
 #include "display/lcd_display.h"
 #include "application.h"
 #include "button.h"
@@ -7,11 +9,17 @@
 #include "i2c_device.h"
 #include "led/single_led.h"
 #include "esp32_camera.h"
+#include "esp32_music.h"
+#include "esp32_motor.h"
+#include "iot/iot.h"
+#include "otto_emoji_display.h"
 
 #include <esp_log.h>
 #include <esp_lcd_panel_vendor.h>
 #include <driver/i2c_master.h>
 #include <driver/spi_common.h>
+#include <wifi_station.h>
+#include "esp_lcd_gc9d01n.h"
 
 #define TAG "atk_dnesp32s3"
 
@@ -43,13 +51,84 @@ public:
     }
 };
 
+class Pca9557 : public I2cDevice {
+public:
+    Pca9557(i2c_master_bus_handle_t i2c_bus, uint8_t addr) : I2cDevice(i2c_bus, addr) {
+        WriteReg(0x01, 0x03);
+        WriteReg(0x03, 0xf8);
+    }
+
+    void SetOutputState(uint8_t bit, uint8_t level) {
+        uint8_t data = ReadReg(0x01);
+        data = (data & ~(1 << bit)) | (level << bit);
+        WriteReg(0x01, data);
+    }
+};
+
+class CustomAudioCodec : public BoxAudioCodec {
+private:
+    Pca9557* pca9557_;
+
+public:
+    CustomAudioCodec(i2c_master_bus_handle_t i2c_bus, Pca9557* pca9557) 
+        : BoxAudioCodec(i2c_bus, 
+                       AUDIO_INPUT_SAMPLE_RATE, 
+                       AUDIO_OUTPUT_SAMPLE_RATE,
+                       AUDIO_I2S_GPIO_MCLK, 
+                       AUDIO_I2S_GPIO_BCLK, 
+                       AUDIO_I2S_GPIO_WS, 
+                       AUDIO_I2S_GPIO_DOUT, 
+                       AUDIO_I2S_GPIO_DIN,
+                       GPIO_NUM_NC, 
+                       AUDIO_CODEC_ES8311_ADDR, 
+                       AUDIO_CODEC_ES7210_ADDR, 
+                       AUDIO_INPUT_REFERENCE),
+          pca9557_(pca9557) {
+    }
+
+    virtual void EnableOutput(bool enable) override {
+        BoxAudioCodec::EnableOutput(enable);
+        // if (enable) {
+        //     pca9557_->SetOutputState(1, 1);
+        // } else {
+        //     pca9557_->SetOutputState(1, 0);
+        // }
+    }
+};
+
+class BotEs8311AudioCodec : public Es8311AudioCodec {
+private:    
+
+public:
+    BotEs8311AudioCodec(void* i2c_master_handle, i2c_port_t i2c_port, int input_sample_rate, int output_sample_rate,
+                        gpio_num_t mclk, gpio_num_t bclk, gpio_num_t ws, gpio_num_t dout, gpio_num_t din,
+                        gpio_num_t pa_pin, uint8_t es8311_addr, bool use_mclk = true)
+        : Es8311AudioCodec(i2c_master_handle, i2c_port, input_sample_rate, output_sample_rate,
+                             mclk,  bclk,  ws,  dout,  din,pa_pin,  es8311_addr,  use_mclk = true) {}
+
+    void EnableOutput(bool enable) override {
+        if (enable == output_enabled_) {
+            return;
+        }
+        if (enable) {
+            Es8311AudioCodec::EnableOutput(enable);
+        } else {
+           // Nothing todo because the display io and PA io conflict
+        }
+    }
+};
+
 class atk_dnesp32s3 : public WifiBoard {
 private:
     i2c_master_bus_handle_t i2c_bus_;
     Button boot_button_;
-    LcdDisplay* display_;
+    OttoEmojiDisplay* display_;
     XL9555* xl9555_;
-    Esp32Camera* camera_;
+    Pca9557* pca9557_;
+    Esp32Camera *camera_;
+    Music* music_;
+    esp_lcd_panel_io_handle_t panel_io = nullptr;
+    esp_lcd_panel_handle_t panel = nullptr;
 
     void InitializeI2c() {
         // Initialize I2C peripheral
@@ -68,7 +147,10 @@ private:
         ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &i2c_bus_));
 
         // Initialize XL9555
-        xl9555_ = new XL9555(i2c_bus_, 0x20);
+        // xl9555_ = new XL9555(i2c_bus_, 0x20);
+
+        // Initialize PCA9557
+        // pca9557_ = new Pca9557(i2c_bus_, 0x19);
     }
 
     // Initialize spi peripheral
@@ -94,39 +176,32 @@ private:
         });
     }
 
-    void InitializeSt7789Display() {
-        esp_lcd_panel_io_handle_t panel_io = nullptr;
-        esp_lcd_panel_handle_t panel = nullptr;
+    void InitializeGc9d01nDisplay() {
         ESP_LOGD(TAG, "Install panel IO");
-        // 液晶屏控制IO初始化
         esp_lcd_panel_io_spi_config_t io_config = {};
-        io_config.cs_gpio_num = LCD_CS_PIN;
-        io_config.dc_gpio_num = LCD_DC_PIN;
-        io_config.spi_mode = 0;
-        io_config.pclk_hz = 20 * 1000 * 1000;
-        io_config.trans_queue_depth = 7;
+        io_config.cs_gpio_num = DISPLAY_CS_PIN;
+        io_config.dc_gpio_num = DISPLAY_DC_PIN;
+        io_config.spi_mode = DISPLAY_SPI_MODE;
+        io_config.pclk_hz = DISPLAY_SPI_SCLK_HZ;
+        io_config.trans_queue_depth = 10;
         io_config.lcd_cmd_bits = 8;
         io_config.lcd_param_bits = 8;
-        esp_lcd_new_panel_io_spi(SPI2_HOST, &io_config, &panel_io);
+        ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi(SPI2_HOST, &io_config, &panel_io));
 
-        // 初始化液晶屏驱动芯片ST7789
-        ESP_LOGD(TAG, "Install LCD driver");
+        ESP_LOGD(TAG, "Install GC9D01N LCD driver");
         esp_lcd_panel_dev_config_t panel_config = {};
-        panel_config.reset_gpio_num = GPIO_NUM_NC;
-        panel_config.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB;
+        panel_config.reset_gpio_num = DISPLAY_RESET_PIN;
+        panel_config.rgb_ele_order = DISPLAY_RGB_ORDER;
         panel_config.bits_per_pixel = 16;
-        panel_config.data_endian = LCD_RGB_DATA_ENDIAN_BIG,
-        esp_lcd_new_panel_st7789(panel_io, &panel_config, &panel);
-        
+        ESP_ERROR_CHECK(esp_lcd_new_panel_gc9d01n(panel_io, &panel_config, &panel));
+
         esp_lcd_panel_reset(panel);
-        xl9555_->SetOutputState(8, 1);
-        xl9555_->SetOutputState(2, 0);
 
         esp_lcd_panel_init(panel);
-        esp_lcd_panel_invert_color(panel, DISPLAY_BACKLIGHT_OUTPUT_INVERT);
-        esp_lcd_panel_swap_xy(panel, DISPLAY_SWAP_XY); 
+        esp_lcd_panel_invert_color(panel, DISPLAY_INVERT_COLOR);
+        esp_lcd_panel_swap_xy(panel, DISPLAY_SWAP_XY);
         esp_lcd_panel_mirror(panel, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
-        display_ = new SpiLcdDisplay(panel_io, panel,
+        display_ = new OttoEmojiDisplay(panel_io, panel,
                                     DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
     }
 
@@ -186,9 +261,9 @@ public:
     atk_dnesp32s3() : boot_button_(BOOT_BUTTON_GPIO) {
         InitializeI2c();
         InitializeSpi();
-        InitializeSt7789Display();
+        InitializeGc9d01nDisplay();
         InitializeButtons();
-        InitializeCamera();
+        // InitializeCamera();
     }
 
     virtual Led* GetLed() override {
@@ -196,6 +271,7 @@ public:
         return &led;
     }
 
+#if 0
     virtual AudioCodec* GetAudioCodec() override {
         static Es8388AudioCodec audio_codec(
             i2c_bus_, 
@@ -208,17 +284,41 @@ public:
             AUDIO_I2S_GPIO_DOUT, 
             AUDIO_I2S_GPIO_DIN,
             GPIO_NUM_NC, 
-            AUDIO_CODEC_ES8388_ADDR
+            AUDIO_CODEC_ES8388_ADDR,
+            true
         );
         return &audio_codec;
     }
+#endif
 
+#if 1
+    virtual AudioCodec* GetAudioCodec() override {
+        static CustomAudioCodec audio_codec(
+            i2c_bus_, 
+            pca9557_);
+        return &audio_codec;
+    }
+#endif
+    
     virtual Display* GetDisplay() override {
         return display_;
     }
-    
-    virtual Camera* GetCamera() override {
-        return camera_;
+
+    virtual Camera *GetCamera() override { return camera_; }
+
+    virtual Music* GetMusic() override {
+        static Music* music_ = new Esp32Music();
+        return music_;
+    }
+
+    virtual Motor* GetMotor() override {
+        static Motor* motor_ = new Esp32Motor();
+        return motor_;
+    }
+
+    virtual IOT* GetIOT() override {
+        static IOT* iot_ = new IOT();
+        return iot_;
     }
 };
 

@@ -20,7 +20,8 @@ public:
     virtual size_t GetFeedSize() = 0;
     virtual void EncodeWakeWordData() = 0;
     virtual bool GetWakeWordOpus(std::vector<uint8_t>& opus) = 0;
-    virtual const std::string& GetLastDetectedWakeWord() const = 0;
+    virtual const std::string &GetLastDetectedWakeWord() const = 0;
+    virtual void Reset() = 0;
 };
 
 #endif

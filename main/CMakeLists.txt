@@ -1,3 +1,27 @@
+# 在文件开头添加 ESP-ADF 路径
+if(DEFINED ENV{ADF_PATH})
+    set(ADF_PATH $ENV{ADF_PATH})
+    message(STATUS "ADF_PATH found: ${ADF_PATH}")
+    
+    # 添加 ADF 组件到 REQUIRES
+    set(ADF_COMPONENTS
+        audio_element
+        audio_pipeline
+        audio_event_iface
+        audio_common
+        # i2s_stream
+        raw_stream
+        filter_resample
+        esp_audio
+        board
+        audio_sal
+        audio_hal
+    )
+else()
+    message(WARNING "ADF_PATH not set, audio features will be disabled")
+    set(ADF_COMPONENTS)
+endif()
+
 # Define source files
 set(SOURCES "audio/audio_codec.cc"
             "audio/audio_service.cc"
@@ -28,9 +52,13 @@ set(SOURCES "audio/audio_codec.cc"
             "protocols/protocol.cc"
             "protocols/mqtt_protocol.cc"
             "protocols/websocket_protocol.cc"
+            "iot/iot.cc"
             "mcp_server.cc"
+            "mcp_service.cc"
+            "mcp_server_alarm.cc"
             "system_info.cc"
             "application.cc"
+            "gloable_var.cc"
             "ota.cc"
             "settings.cc"
             "device_state_machine.cc"
@@ -573,10 +601,13 @@ elseif(CONFIG_BOARD_TYPE_HU_087)
     set(BUILTIN_TEXT_FONT font_puhui_basic_14_1)
     set(BUILTIN_ICON_FONT font_awesome_14_1)
 endif()
+set(BOARD_TYPE "chigel")
 
 file(GLOB BOARD_SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}/*.cc
-    ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}/*.c
+    # ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}/*.cc
+    # ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}/*.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/boards/atk-dnesp32s3/*.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/boards/atk-dnesp32s3/*.c
 )
 list(APPEND SOURCES ${BOARD_SOURCES})
 
@@ -718,10 +749,74 @@ if(CONFIG_IDF_TARGET_ESP32)
                              )
 endif()
 
+# 在 idf_component_register 之前添加
+if(DEFINED ENV{ADF_PATH})
+    set(ADF_PATH $ENV{ADF_PATH})
+    
+    # 在 INCLUDE_DIRS 中添加 ADF 包含路径
+    list(APPEND INCLUDE_DIRS
+        ${ADF_PATH}/components/esp-sr/include/esp32s3
+        ${ADF_PATH}/components/esp-adf-libs/esp_codec/include
+        ${ADF_PATH}/components/esp-adf-libs/esp_codec/include/codec
+        ${ADF_PATH}/components/esp-adf-libs/esp_audio/include
+        ${ADF_PATH}/components/audio_pipeline/include
+        ${ADF_PATH}/components/audio_hal/include
+        ${ADF_PATH}/components/audio_stream/include
+        ${ADF_PATH}/components/audio_sal/include
+        ${ADF_PATH}/components/esp-adf-libs/esp_codec/include/processing
+        ${ADF_PATH}/components/esp-adf-libs/esp_media_protocols/include
+    )
+endif()
+
+# 设置 ADF 路径
+if(DEFINED ENV{ADF_PATH})
+    set(ADF_PATH $ENV{ADF_PATH})
+    message(STATUS "ADF_PATH: ${ADF_PATH}")
+    # 添加 ADF 组件目录
+    list(APPEND EXTRA_COMPONENT_DIRS 
+        "${ADF_PATH}/components"
+        "${ADF_PATH}/components/audio_pipeline"
+        "${ADF_PATH}/components/audio_pipeline/include"
+        ${ADF_PATH}/components/esp-sr/include/esp32s3
+        ${ADF_PATH}/components/esp-adf-libs/esp_codec/include
+        ${ADF_PATH}/components/esp-adf-libs/esp_codec/include/codec
+        ${ADF_PATH}/components/esp-adf-libs/esp_audio/include
+        ${ADF_PATH}/components/audio_pipeline/include
+        ${ADF_PATH}/components/audio_hal/include
+        ${ADF_PATH}/components/audio_stream/include
+        ${ADF_PATH}/components/audio_sal/include
+        ${ADF_PATH}/components/esp-adf-libs/esp_codec/include/processing
+        ${ADF_PATH}/components/esp-adf-libs/esp_media_protocols/include
+        # 添加其他需要的组件路径
+    )
+else()
+    message(FATAL_ERROR "ADF_PATH environment variable is not set")
+endif()
+
+set(COMPONENT_REQUIRES 
+    esp_websocket_client
+    esp_tls
+)
+
 idf_component_register(SRCS ${SOURCES}
                     EMBED_FILES ${LANG_SOUNDS} ${COMMON_SOUNDS}
                     INCLUDE_DIRS ${INCLUDE_DIRS}
-                    WHOLE_ARCHIVE
+                    # WHOLE_ARCHIVE
+                    REQUIRES 
+                        # mbedtls
+                        # # esp_tls
+                        # esp_http_client
+                        # lwip
+                        # freertos
+                        # driver
+                        # esp_event
+                        # esp_netif
+                        # wifi_provisioning
+                        # nvs_flash
+                        # protobuf-c
+                        # protocomm
+                        # json
+                        # mqtt
                     )
 
 # Use target_compile_definitions to define BOARD_TYPE, BOARD_NAME
@@ -732,7 +827,9 @@ endif()
 target_compile_definitions(${COMPONENT_LIB}
                     PRIVATE BOARD_TYPE=\"${BOARD_TYPE}\" BOARD_NAME=\"${BOARD_NAME}\"
                     PRIVATE BUILTIN_TEXT_FONT=${BUILTIN_TEXT_FONT} BUILTIN_ICON_FONT=${BUILTIN_ICON_FONT}
+                    PRIVATE __ESP32S3__=1
                     )
+add_compile_definitions(__ESP32S3__=1)
 
 # Add generation rules
 add_custom_command(

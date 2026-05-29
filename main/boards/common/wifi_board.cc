@@ -200,7 +200,7 @@ void WifiBoard::StartWifiConfigMode() {
 
 void WifiBoard::EnterWifiConfigMode() {
     ESP_LOGI(TAG, "EnterWifiConfigMode called");
-    GetDisplay()->ShowNotification(Lang::Strings::ENTERING_WIFI_CONFIG_MODE);
+    // GetDisplay()->ShowNotification(Lang::Strings::ENTERING_WIFI_CONFIG_MODE);
 
     auto& app = Application::GetInstance();
     auto state = app.GetDeviceState();
@@ -316,11 +316,13 @@ std::string WifiBoard::GetDeviceStatusJson() {
     if (auto backlight = board.GetBacklight()) {
         cJSON_AddNumberToObject(screen, "brightness", backlight->brightness());
     }
+#if 0
     if (auto display = board.GetDisplay(); display && display->height() > 64) {
         if (auto theme = display->GetTheme()) {
             cJSON_AddStringToObject(screen, "theme", theme->name().c_str());
         }
     }
+#endif
     cJSON_AddItemToObject(root, "screen", screen);
 
     // Battery

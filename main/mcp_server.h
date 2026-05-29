@@ -318,6 +318,9 @@ public:
         return instance;
     }
 
+    McpServer();
+    ~McpServer();
+
     void AddCommonTools();
     void AddUserOnlyTools();
     void AddTool(McpTool* tool);
@@ -327,9 +330,6 @@ public:
     void ParseMessage(const std::string& message);
 
 private:
-    McpServer();
-    ~McpServer();
-
     void ParseCapabilities(const cJSON* capabilities);
 
     void ReplyResult(int id, const std::string& result);

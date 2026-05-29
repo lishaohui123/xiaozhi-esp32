@@ -20,11 +20,44 @@
 
 AudioService::AudioService() {
     event_group_ = xEventGroupCreate();
+    is_voice_out_ = false;
+    voice_call_ = VoiceCall::get_instance();
 }
 
 AudioService::~AudioService() {
     if (event_group_ != nullptr) {
         vEventGroupDelete(event_group_);
+    }
+
+    // 释放静态任务内存
+    if (audio_input_task_stack_ != nullptr) {
+        heap_caps_free(audio_input_task_stack_);
+        audio_input_task_stack_ = nullptr;
+    }
+    
+    if (audio_input_task_buffer_ != nullptr) {
+        heap_caps_free(audio_input_task_buffer_);
+        audio_input_task_buffer_ = nullptr;
+    }
+    
+    if (audio_output_task_stack_ != nullptr) {
+        heap_caps_free(audio_output_task_stack_);
+        audio_output_task_stack_ = nullptr;
+    }
+    
+    if (audio_output_task_buffer_ != nullptr) {
+        heap_caps_free(audio_output_task_buffer_);
+        audio_output_task_buffer_ = nullptr;
+    }
+    
+    if (opus_codec_task_stack_ != nullptr) {
+        heap_caps_free(opus_codec_task_stack_);
+        opus_codec_task_stack_ = nullptr;
+    }
+    
+    if (opus_codec_task_buffer_ != nullptr) {
+        heap_caps_free(opus_codec_task_buffer_);
+        opus_codec_task_buffer_ = nullptr;
     }
 }
 
@@ -33,6 +66,18 @@ void AudioService::Initialize(AudioCodec* codec) {
     codec_ = codec;
     codec_->Start();
 
+    // 注册硬件状态变化回调，用于重置AFE
+    codec_->SetHardwareStateChangeCallback([this]() {
+      // 输出状态改变（如启用/禁用、音量调整可能重启I2S）时，
+      // 重置AFE缓冲区，避免后续处理使用无效参考信号
+      if (audio_processor_) {
+        audio_processor_->Reset();
+      }
+      if (wake_word_) {
+        wake_word_->Reset();
+      }
+    });
+    
     /* Setup the audio codec */
     opus_decoder_ = std::make_unique<OpusDecoderWrapper>(codec->output_sample_rate(), 1, OPUS_FRAME_DURATION_MS);
     opus_encoder_ = std::make_unique<OpusEncoderWrapper>(16000, 1, OPUS_FRAME_DURATION_MS);
@@ -73,6 +118,7 @@ void AudioService::Initialize(AudioCodec* codec) {
     esp_timer_create(&audio_power_timer_args, &audio_power_timer_);
 }
 
+#if 0
 void AudioService::Start() {
     service_stopped_ = false;
     xEventGroupClearBits(event_group_, AS_EVENT_AUDIO_TESTING_RUNNING | AS_EVENT_WAKE_WORD_RUNNING | AS_EVENT_AUDIO_PROCESSOR_RUNNING);
@@ -116,6 +162,93 @@ void AudioService::Start() {
         vTaskDelete(NULL);
     }, "opus_codec", 2048 * 13, this, 2, &opus_codec_task_handle_);
 }
+#endif
+
+void AudioService::Start() {
+    service_stopped_ = false;
+    xEventGroupClearBits(event_group_, AS_EVENT_AUDIO_TESTING_RUNNING | AS_EVENT_WAKE_WORD_RUNNING | AS_EVENT_AUDIO_PROCESSOR_RUNNING);
+
+    esp_timer_start_periodic(audio_power_timer_, 1000000);
+
+    // 定义任务栈大小
+    const size_t audio_input_stack_size = CONFIG_USE_AUDIO_PROCESSOR ? (2048 * 3) : (2048 * 2);
+    const size_t audio_output_stack_size = CONFIG_USE_AUDIO_PROCESSOR ? (2048 * 2) : 2048;
+    const size_t opus_codec_stack_size = 2048 * 13;
+
+    // 分配音频输入任务栈内存
+    audio_input_task_stack_ = (StackType_t*)heap_caps_malloc(audio_input_stack_size * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
+    assert(audio_input_task_stack_ != nullptr);
+
+    // 分配音频输入任务控制块内存
+    audio_input_task_buffer_ = (StaticTask_t*)heap_caps_malloc(sizeof(StaticTask_t), MALLOC_CAP_INTERNAL);
+    assert(audio_input_task_buffer_ != nullptr);
+
+    // 分配音频输出任务栈内存
+    audio_output_task_stack_ = (StackType_t*)heap_caps_malloc(audio_output_stack_size * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
+    assert(audio_output_task_stack_ != nullptr);
+    
+    // 分配音频输出任务控制块内存
+    audio_output_task_buffer_ = (StaticTask_t*)heap_caps_malloc(sizeof(StaticTask_t), MALLOC_CAP_INTERNAL);
+    assert(audio_output_task_buffer_ != nullptr);
+
+    // 分配Opus编解码任务栈内存
+    opus_codec_task_stack_ = (StackType_t*)heap_caps_malloc(opus_codec_stack_size * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
+    assert(opus_codec_task_stack_ != nullptr);
+    
+    // 分配Opus编解码任务控制块内存
+    opus_codec_task_buffer_ = (StaticTask_t*)heap_caps_malloc(sizeof(StaticTask_t), MALLOC_CAP_INTERNAL);
+    assert(opus_codec_task_buffer_ != nullptr);
+
+    // 创建音频输入任务（静态方式）
+    audio_input_task_handle_ = xTaskCreateStatic(
+        [](void* arg) {
+            AudioService* audio_service = (AudioService*)arg;
+            audio_service->AudioInputTask();
+        },
+        "audio_input",
+        audio_input_stack_size,
+        this,
+        8,
+        audio_input_task_stack_,
+        audio_input_task_buffer_
+    );
+
+    assert(audio_input_task_handle_ != nullptr);
+
+    // 创建音频输出任务（静态方式）
+    audio_output_task_handle_ = xTaskCreateStatic(
+        [](void* arg) {
+            AudioService* audio_service = (AudioService*)arg;
+            audio_service->AudioOutputTask();
+        },
+        "audio_output",
+        audio_output_stack_size,
+        this,
+        4,
+        audio_output_task_stack_,
+        audio_output_task_buffer_
+    );
+    
+    assert(audio_output_task_handle_ != nullptr);
+
+    // 创建Opus编解码任务（静态方式）
+    opus_codec_task_handle_ = xTaskCreateStatic(
+        [](void* arg) {
+            AudioService* audio_service = (AudioService*)arg;
+            audio_service->OpusCodecTask();
+        },
+        "opus_codec",
+        opus_codec_stack_size,
+        this,
+        2,
+        opus_codec_task_stack_,
+        opus_codec_task_buffer_
+    );
+
+    assert(opus_codec_task_handle_ != nullptr);
+
+    ESP_LOGI(TAG, "All audio tasks created successfully using static allocation");
+}
 
 void AudioService::Stop() {
     esp_timer_stop(audio_power_timer_);
@@ -130,8 +263,30 @@ void AudioService::Stop() {
     audio_playback_queue_.clear();
     audio_testing_queue_.clear();
     audio_queue_cv_.notify_all();
+
+    // 等待任务退出（给予一定的延迟）
+    vTaskDelay(pdMS_TO_TICKS(100));
+    
+    // 删除任务
+    if (audio_input_task_handle_ != nullptr) {
+        vTaskDelete(audio_input_task_handle_);
+        audio_input_task_handle_ = nullptr;
+    }
+    
+    if (audio_output_task_handle_ != nullptr) {
+        vTaskDelete(audio_output_task_handle_);
+        audio_output_task_handle_ = nullptr;
+    }
+    
+    if (opus_codec_task_handle_ != nullptr) {
+        vTaskDelete(opus_codec_task_handle_);
+        opus_codec_task_handle_ = nullptr;
+    }
+    
+    ESP_LOGI(TAG, "Audio service stopped");
 }
 
+#if 0 // 原有的代码
 bool AudioService::ReadAudioData(std::vector<int16_t>& data, int sample_rate, int samples) {
     if (!codec_->input_enabled()) {
         esp_timer_stop(audio_power_timer_);
@@ -169,6 +324,138 @@ bool AudioService::ReadAudioData(std::vector<int16_t>& data, int sample_rate, in
         data.resize(samples * codec_->input_channels());
         if (!codec_->InputData(data)) {
             return false;
+        }
+    }
+
+    /* Update the last input time */
+    last_input_time_ = std::chrono::steady_clock::now();
+    debug_statistics_.input_count++;
+
+#if CONFIG_USE_AUDIO_DEBUGGER
+    // 音频调试：发送原始音频数据
+    if (audio_debugger_ == nullptr) {
+        audio_debugger_ = std::make_unique<AudioDebugger>();
+    }
+    audio_debugger_->Feed(data);
+#endif
+
+    return true;
+}
+#endif
+
+#if 0   // int channels = 2
+bool AudioService::ReadAudioData(std::vector<int16_t>& data, int sample_rate, int samples) {
+    if (!codec_->input_enabled()) {
+        esp_timer_stop(audio_power_timer_);
+        esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
+        codec_->EnableInput(true);
+    }
+
+    if (codec_->input_sample_rate() != sample_rate) {
+        int channels = 2;
+        data.resize(samples * codec_->input_sample_rate() / sample_rate * channels);
+        if (!codec_->InputData(data)) {
+            return false;
+        }
+        if (codec_->input_channels() == 2) {
+            auto mic_channel = std::vector<int16_t>(data.size() / channels);
+            auto reference_channel = std::vector<int16_t>(data.size() / channels);
+            for (size_t i = 0, j = 0; i < mic_channel.size(); ++i, j += channels) {
+                mic_channel[i] = data[j];
+                reference_channel[i] = data[j + 1];
+            }
+            auto resampled_mic = std::vector<int16_t>(input_resampler_.GetOutputSamples(mic_channel.size()));
+            auto resampled_reference = std::vector<int16_t>(reference_resampler_.GetOutputSamples(reference_channel.size()));
+            input_resampler_.Process(mic_channel.data(), mic_channel.size(), resampled_mic.data());
+            reference_resampler_.Process(reference_channel.data(), reference_channel.size(), resampled_reference.data());
+            data.resize(resampled_mic.size() + resampled_reference.size());
+            for (size_t i = 0, j = 0; i < resampled_mic.size(); ++i, j += 2) {
+                data[j] = resampled_mic[i];
+                data[j + 1] = resampled_reference[i];
+            }
+        } else {
+            auto resampled = std::vector<int16_t>(input_resampler_.GetOutputSamples(data.size()));
+            input_resampler_.Process(data.data(), data.size(), resampled.data());
+            data = std::move(resampled);
+        }
+    } else {
+        data.resize(samples * codec_->input_channels());
+        if (!codec_->InputData(data)) {
+            return false;
+        }
+    }
+
+    /* Update the last input time */
+    last_input_time_ = std::chrono::steady_clock::now();
+    debug_statistics_.input_count++;
+
+#if CONFIG_USE_AUDIO_DEBUGGER
+    // 音频调试：发送原始音频数据
+    if (audio_debugger_ == nullptr) {
+        audio_debugger_ = std::make_unique<AudioDebugger>();
+    }
+    audio_debugger_->Feed(data);
+#endif
+
+    return true;
+}
+#endif
+
+// 解决音乐播放时，自动填充AEC的数据
+bool AudioService::ReadAudioData(std::vector<int16_t>& data, int sample_rate, int samples) {
+    if (!codec_->input_enabled()) {
+        esp_timer_stop(audio_power_timer_);
+        esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
+        codec_->EnableInput(true);
+    }
+
+    if (codec_->input_sample_rate() != sample_rate) {
+        int channels = 2;
+        data.resize(samples * codec_->input_sample_rate() / sample_rate * channels);
+        if (!codec_->InputData(data)) {
+            return false;
+        }
+        if (codec_->input_channels() == 2) {
+            auto mic_channel = std::vector<int16_t>(data.size() / channels);
+            auto reference_channel = std::vector<int16_t>(data.size() / channels);
+            for (size_t i = 0, j = 0; i < mic_channel.size(); ++i, j += channels) {
+                mic_channel[i] = data[j];
+                reference_channel[i] = data[j + 1];
+            }
+
+            // 🔥 关键修复：当音乐播放等场景需要旁路AEC时，将参考信号强制清零
+            // 避免AEC滤波器因音乐参考信号与麦克风信号不相关而发散崩溃
+            if (bypass_aec_reference_.load()) {
+                std::fill(reference_channel.begin(), reference_channel.end(), 0);
+            }
+
+            auto resampled_mic = std::vector<int16_t>(input_resampler_.GetOutputSamples(mic_channel.size()));
+            auto resampled_reference = std::vector<int16_t>(reference_resampler_.GetOutputSamples(reference_channel.size()));
+            input_resampler_.Process(mic_channel.data(), mic_channel.size(), resampled_mic.data());
+            reference_resampler_.Process(reference_channel.data(), reference_channel.size(), resampled_reference.data());
+            data.resize(resampled_mic.size() + resampled_reference.size());
+            for (size_t i = 0, j = 0; i < resampled_mic.size(); ++i, j += 2) {
+                data[j] = resampled_mic[i];
+                data[j + 1] = resampled_reference[i];
+            }
+        } else {
+            auto resampled = std::vector<int16_t>(input_resampler_.GetOutputSamples(data.size()));
+            input_resampler_.Process(data.data(), data.size(), resampled.data());
+            data = std::move(resampled);
+        }
+    } else {
+        data.resize(samples * codec_->input_channels());
+        if (!codec_->InputData(data)) {
+            return false;
+        }
+
+        // 🔥 当输入采样率与目标采样率一致，但 codec 提供双声道时，同样需要处理旁路逻辑
+        if (codec_->input_channels() == 2 && bypass_aec_reference_.load()) {
+            // 双声道数据布局：[L0, R0, L1, R1, ...]
+            // 将参考声道（R）清零
+            for (size_t i = 1; i < data.size(); i += 2) {
+                data[i] = 0;
+            }
         }
     }
 
@@ -359,6 +646,7 @@ void AudioService::OpusCodecTask() {
                 if (callbacks_.on_send_queue_available) {
                     callbacks_.on_send_queue_available();
                 }
+                voice_call_->SetWebsocketSendAudio();
             } else if (task->type == kAudioTaskTypeEncodeToTestingQueue) {
                 std::lock_guard<std::mutex> lock(audio_queue_mutex_);
                 audio_testing_queue_.push_back(std::move(packet));
@@ -468,14 +756,16 @@ void AudioService::EnableWakeWordDetection(bool enable) {
         }
         wake_word_->Start();
         xEventGroupSetBits(event_group_, AS_EVENT_WAKE_WORD_RUNNING);
+        vTaskDelay(pdMS_TO_TICKS(100));
     } else {
         wake_word_->Stop();
         xEventGroupClearBits(event_group_, AS_EVENT_WAKE_WORD_RUNNING);
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
 
 void AudioService::EnableVoiceProcessing(bool enable) {
-    ESP_LOGD(TAG, "%s voice processing", enable ? "Enabling" : "Disabling");
+    ESP_LOGI(TAG, "%s voice processing", enable ? "Enabling" : "Disabling");
     if (enable) {
         if (!audio_processor_initialized_) {
             audio_processor_->Initialize(codec_, OPUS_FRAME_DURATION_MS, models_list_);
@@ -487,9 +777,11 @@ void AudioService::EnableVoiceProcessing(bool enable) {
         audio_input_need_warmup_ = true;
         audio_processor_->Start();
         xEventGroupSetBits(event_group_, AS_EVENT_AUDIO_PROCESSOR_RUNNING);
+        vTaskDelay(pdMS_TO_TICKS(100));
     } else {
         audio_processor_->Stop();
         xEventGroupClearBits(event_group_, AS_EVENT_AUDIO_PROCESSOR_RUNNING);
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
 
@@ -642,7 +934,9 @@ void AudioService::CheckAndUpdateAudioPowerState() {
         codec_->EnableInput(false);
     }
     if (output_elapsed > AUDIO_POWER_TIMEOUT_MS && codec_->output_enabled()) {
-        codec_->EnableOutput(false);
+        if (!is_voice_out_) {
+            codec_->EnableOutput(false);
+        }
     }
     if (!codec_->input_enabled() && !codec_->output_enabled()) {
         esp_timer_stop(audio_power_timer_);

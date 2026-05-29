@@ -247,10 +247,10 @@ bool Assets::Apply() {
     auto display = Board::GetInstance().GetDisplay();
     ESP_LOGI(TAG, "Refreshing display theme...");
 
-    auto current_theme = display->GetTheme();
-    if (current_theme != nullptr) {
-        display->SetTheme(current_theme);
-    }
+    // auto current_theme = display->GetTheme();
+    // if (current_theme != nullptr) {
+    //     display->SetTheme(current_theme);
+    // }
 
     // Parse hide_subtitle configuration
     cJSON* hide_subtitle = cJSON_GetObjectItem(root, "hide_subtitle");

@@ -9,6 +9,7 @@
 #include <esp_log.h>
 #include <arpa/inet.h>
 #include "assets/lang_config.h"
+#include "constants.h"
 
 #define TAG "WS"
 
@@ -17,6 +18,7 @@ WebsocketProtocol::WebsocketProtocol() {
 }
 
 WebsocketProtocol::~WebsocketProtocol() {
+    CleanupWebSocket();
     vEventGroupDelete(event_group_handle_);
 }
 
@@ -76,14 +78,36 @@ bool WebsocketProtocol::IsAudioChannelOpened() const {
 }
 
 void WebsocketProtocol::CloseAudioChannel() {
+    CleanupWebSocket();
+
     websocket_.reset();
+
+    /****************************
+     * 为了解决第二次不能
+     * 正常唤醒的问题
+     ****************************/
+    error_occurred_ = false;
+    session_id_.clear();
+    last_incoming_time_ = std::chrono::steady_clock::now();
 }
 
 bool WebsocketProtocol::OpenAudioChannel() {
+    // 禁用省电模式
+    esp_wifi_set_ps(WIFI_PS_NONE);
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    // 确保先清理旧的连接
+    CleanupWebSocket();
+#if 0
     Settings settings("websocket", false);
     std::string url = settings.GetString("url");
     std::string token = settings.GetString("token");
     int version = settings.GetInt("version");
+    std::string url = OTA_WS;
+#endif
+    std::string url = CONFIG_OTA_WS;
+    std::string token = "";
+    int version = 1;
     if (version != 0) {
         version_ = version;
     }
@@ -91,7 +115,8 @@ bool WebsocketProtocol::OpenAudioChannel() {
     error_occurred_ = false;
 
     auto network = Board::GetInstance().GetNetwork();
-    websocket_ = network->CreateWebSocket(1);
+    int connection_id = esp_random() % 1000;
+    websocket_ = network->CreateWebSocket(connection_id);
     if (websocket_ == nullptr) {
         ESP_LOGE(TAG, "Failed to create websocket");
         return false;
@@ -250,4 +275,36 @@ void WebsocketProtocol::ParseServerHello(const cJSON* root) {
     }
 
     xEventGroupSetBits(event_group_handle_, WEBSOCKET_PROTOCOL_SERVER_HELLO_EVENT);
+}
+
+void WebsocketProtocol::CleanupWebSocket() {
+    if (is_cleaning_up_) return;
+    is_cleaning_up_ = true;
+    
+    // 1. 先取消所有回调
+    if (websocket_) {
+        websocket_->OnData(nullptr);
+        websocket_->OnDisconnected(nullptr);
+        websocket_->OnError(nullptr);
+        
+        // 2. 优雅关闭连接
+        websocket_->Close();
+        
+        // 3. 延迟释放，确保关闭完成
+        vTaskDelay(pdMS_TO_TICKS(100));
+        
+        // 4. 重置指针
+        websocket_.reset();
+    }
+    
+    // 5. 重置事件组
+    xEventGroupClearBits(event_group_handle_, 
+                         WEBSOCKET_PROTOCOL_SERVER_HELLO_EVENT);
+    
+    // 6. 重置状态
+    error_occurred_ = false;
+    session_id_.clear();
+    last_incoming_time_ = std::chrono::steady_clock::now();
+    
+    is_cleaning_up_ = false;
 }

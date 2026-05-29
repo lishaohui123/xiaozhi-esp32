@@ -16,12 +16,16 @@
 #include <opus_encoder.h>
 #include <opus_decoder.h>
 #include <opus_resampler.h>
+#include "/Users/lishaohui/code/xiaozhi-esp32_github/managed_components/78__esp-opus-encoder/include/opus_encoder.h"
+#include "/Users/lishaohui/code/xiaozhi-esp32_github/managed_components/78__esp-opus-encoder/include/opus_decoder.h"
+#include "/Users/lishaohui/code/xiaozhi-esp32_github/managed_components/78__esp-opus-encoder/include/opus_resampler.h"
 
 #include "audio_codec.h"
 #include "audio_processor.h"
 #include "processors/audio_debugger.h"
 #include "wake_word.h"
 #include "protocol.h"
+#include "voice_call.h"
 
 
 /*
@@ -35,8 +39,10 @@
  * 
  */
 
-#define OPUS_FRAME_DURATION_MS 60
-#define MAX_ENCODE_TASKS_IN_QUEUE 2
+// #define OPUS_FRAME_DURATION_MS 60
+#define OPUS_FRAME_DURATION_MS 20       // 适配妙月
+// #define MAX_ENCODE_TASKS_IN_QUEUE 2
+#define MAX_ENCODE_TASKS_IN_QUEUE 40
 #define MAX_PLAYBACK_TASKS_IN_QUEUE 2
 #define MAX_DECODE_PACKETS_IN_QUEUE (2400 / OPUS_FRAME_DURATION_MS)
 #define MAX_SEND_PACKETS_IN_QUEUE (2400 / OPUS_FRAME_DURATION_MS)
@@ -109,6 +115,15 @@ public:
     bool ReadAudioData(std::vector<int16_t>& data, int sample_rate, int samples);
     void ResetDecoder();
     void SetModelsList(srmodel_list_t* models_list);
+    
+    std::chrono::steady_clock::time_point last_output_time_;
+    
+    EventGroupHandle_t event_group_;
+
+    volatile bool is_voice_out_;
+
+    // 为了解决播放音乐时的afe的冲突问题
+    void SetBypassAecReference(bool bypass) { bypass_aec_reference_ = bypass; }
 
 private:
     AudioCodec* codec_ = nullptr;
@@ -123,8 +138,6 @@ private:
     OpusResampler output_resampler_;
     DebugStatistics debug_statistics_;
     srmodel_list_t* models_list_ = nullptr;
-
-    EventGroupHandle_t event_group_;
 
     // Audio encode / decode
     TaskHandle_t audio_input_task_handle_ = nullptr;
@@ -148,7 +161,22 @@ private:
 
     esp_timer_handle_t audio_power_timer_ = nullptr;
     std::chrono::steady_clock::time_point last_input_time_;
-    std::chrono::steady_clock::time_point last_output_time_;
+    // std::chrono::steady_clock::time_point last_output_time_;
+
+    // 任务栈和控制块内存（静态分配）
+    StackType_t* audio_input_task_stack_ = nullptr;
+    StaticTask_t* audio_input_task_buffer_ = nullptr;
+    
+    StackType_t* audio_output_task_stack_ = nullptr;
+    StaticTask_t* audio_output_task_buffer_ = nullptr;
+    
+    StackType_t* opus_codec_task_stack_ = nullptr;
+    StaticTask_t* opus_codec_task_buffer_ = nullptr;
+
+    VoiceCall* voice_call_;
+
+    // 为了解决播放音乐时的afe的冲突问题
+    std::atomic<bool> bypass_aec_reference_{false};
 
     void AudioInputTask();
     void AudioOutputTask();

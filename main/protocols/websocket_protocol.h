@@ -29,6 +29,12 @@ private:
     void ParseServerHello(const cJSON* root);
     bool SendText(const std::string& text) override;
     std::string GetHelloMessage();
+
+    // 添加清理标志
+    std::atomic<bool> is_cleaning_up_{false};
+    
+    // 添加清理函数
+    void CleanupWebSocket();
 };
 
 #endif

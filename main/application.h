@@ -16,6 +16,7 @@
 #include "audio_service.h"
 #include "device_state.h"
 #include "device_state_machine.h"
+#include "voice_call.h"
 
 // Main event bits
 #define MAIN_EVENT_SCHEDULE             (1 << 0)
@@ -119,7 +120,14 @@ public:
      * This includes closing audio channel, resetting protocol and ota objects
      */
     void ResetProtocol();
+#if 1
+    Protocol* GetProtocol() { return protocol_.get(); }
 
+    void AddAudioData(AudioStreamPacket&& packet);
+
+    VoiceCall* voice_call_;
+    volatile bool is_voice_call_;
+#endif
 private:
     Application();
     ~Application();
@@ -143,7 +151,6 @@ private:
     int clock_ticks_ = 0;
     TaskHandle_t activation_task_handle_ = nullptr;
 
-
     // Event handlers
     void HandleStateChangedEvent();
     void HandleToggleChatEvent();
@@ -163,6 +170,8 @@ private:
     void InitializeProtocol();
     void ShowActivationCode(const std::string& code, const std::string& message);
     void SetListeningMode(ListeningMode mode);
+
+    void InitializeMySystem();
     
     // State change handler called by state machine
     void OnStateChanged(DeviceState old_state, DeviceState new_state);

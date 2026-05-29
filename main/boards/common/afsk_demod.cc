@@ -77,7 +77,7 @@ namespace audio_wifi_config
                 // If complete data was received, extract WiFi credentials
                 if (data_buffer.decoded_text.has_value()) {
                     ESP_LOGI(kLogTag, "Received text data: %s", data_buffer.decoded_text->c_str());
-                    display->SetChatMessage("system", data_buffer.decoded_text->c_str());
+                    // display->SetChatMessage("system", data_buffer.decoded_text->c_str());
                     
                     // Split SSID and password by newline character
                     std::string wifi_ssid, wifi_password;
