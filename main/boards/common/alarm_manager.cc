@@ -2304,7 +2304,7 @@ void AlarmManager::TriggerAlarm(const AlarmInfo& alarm) {
     
     if (alarm.tip_template_id == -1) {
         // 播放TTS语音流
-        alarm_msg = "小主人，小主人，时间到了，时间到了，咱该" + alarm.message + "了啊";
+        alarm_msg = "小主人，小主人，时间到了，时间到了，咱该" + alarm.message;
         repeat = 3;
     } else {
         // 向后端获取提示语

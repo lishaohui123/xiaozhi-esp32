@@ -38,6 +38,7 @@ extern "C" {
 #define TOPIC_DEVICE_ALARM_TEMPLATE  "device/%s/alarm"
 #define TOPIC_DEVICE_WORKS_TEMPLATE  "device/%s/works"
 #define TOPIC_DEVICE_AUDIO_TEMPLATE  "device/%s/audio"
+#define TOPIC_SOCIAL_HD_TEMPLATE  "social/%s/hd"
 
 #define CALL_CONNECT_TIMEOUT_MS 60000  // 60秒连接超时
 #define CALL_RESPONSE_TIMEOUT_MS 60000 // 60秒响应超时
@@ -203,6 +204,8 @@ private:
     void handle_device_works(const char* payload);
 
     void handle_device_audio(const char *payload);
+
+    void handle_social_hd(const char* payload);
     
     // UDP任务
     void udp_receive_task();

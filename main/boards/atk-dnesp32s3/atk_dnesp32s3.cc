@@ -19,7 +19,7 @@
 #include <driver/i2c_master.h>
 #include <driver/spi_common.h>
 #include <wifi_station.h>
-#include "esp_lcd_gc9d01n.h"
+#include <esp_lcd_gc9a01.h>
 
 #define TAG "atk_dnesp32s3"
 
@@ -122,7 +122,7 @@ class atk_dnesp32s3 : public WifiBoard {
 private:
     i2c_master_bus_handle_t i2c_bus_;
     Button boot_button_;
-    OttoEmojiDisplay* display_;
+    SpiLcdDisplay* display_;
     XL9555* xl9555_;
     Pca9557* pca9557_;
     Esp32Camera *camera_;
@@ -153,16 +153,10 @@ private:
         // pca9557_ = new Pca9557(i2c_bus_, 0x19);
     }
 
-    // Initialize spi peripheral
     void InitializeSpi() {
-        spi_bus_config_t buscfg = {};
-        buscfg.mosi_io_num = LCD_MOSI_PIN;
-        buscfg.miso_io_num = GPIO_NUM_NC;
-        buscfg.sclk_io_num = LCD_SCLK_PIN;
-        buscfg.quadwp_io_num = GPIO_NUM_NC;
-        buscfg.quadhd_io_num = GPIO_NUM_NC;
-        buscfg.max_transfer_sz = DISPLAY_WIDTH * DISPLAY_HEIGHT * sizeof(uint16_t);
-        ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO));
+        spi_bus_config_t buscfg = GC9A01_PANEL_BUS_SPI_CONFIG(DISPLAY_SPI_SCLK_PIN, DISPLAY_SPI_MOSI_PIN,
+                                    DISPLAY_WIDTH * DISPLAY_HEIGHT * sizeof(uint16_t));
+        ESP_ERROR_CHECK(spi_bus_initialize(SPI3_HOST, &buscfg, SPI_DMA_CH_AUTO));
     }
 
     void InitializeButtons() {
@@ -176,35 +170,36 @@ private:
         });
     }
 
-    void InitializeGc9d01nDisplay() {
-        ESP_LOGD(TAG, "Install panel IO");
-        esp_lcd_panel_io_spi_config_t io_config = {};
-        io_config.cs_gpio_num = DISPLAY_CS_PIN;
-        io_config.dc_gpio_num = DISPLAY_DC_PIN;
-        io_config.spi_mode = DISPLAY_SPI_MODE;
+    void InitializeGc9a01Display() {
+        ESP_LOGI(TAG, "Init GC9A01 display");
+        ESP_LOGI(TAG, "Install panel IO");
+        esp_lcd_panel_io_spi_config_t io_config = GC9A01_PANEL_IO_SPI_CONFIG(DISPLAY_SPI_CS_PIN, DISPLAY_SPI_DC_PIN, 0, NULL);
         io_config.pclk_hz = DISPLAY_SPI_SCLK_HZ;
-        io_config.trans_queue_depth = 10;
-        io_config.lcd_cmd_bits = 8;
-        io_config.lcd_param_bits = 8;
-        ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi(SPI2_HOST, &io_config, &panel_io));
+        ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi(SPI3_HOST, &io_config, &panel_io));
 
-        ESP_LOGD(TAG, "Install GC9D01N LCD driver");
+        ESP_LOGI(TAG, "Install GC9A01 panel driver");
         esp_lcd_panel_dev_config_t panel_config = {};
-        panel_config.reset_gpio_num = DISPLAY_RESET_PIN;
-        panel_config.rgb_ele_order = DISPLAY_RGB_ORDER;
+        panel_config.reset_gpio_num = DISPLAY_SPI_RESET_PIN;
+        panel_config.rgb_endian = LCD_RGB_ENDIAN_BGR;
         panel_config.bits_per_pixel = 16;
-        ESP_ERROR_CHECK(esp_lcd_new_panel_gc9d01n(panel_io, &panel_config, &panel));
 
-        esp_lcd_panel_reset(panel);
+        ESP_ERROR_CHECK(esp_lcd_new_panel_gc9a01(panel_io, &panel_config, &panel));
+        ESP_ERROR_CHECK(esp_lcd_panel_reset(panel));
+        ESP_ERROR_CHECK(esp_lcd_panel_init(panel));
+        ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel, true));
+        ESP_ERROR_CHECK(esp_lcd_panel_mirror(panel, true, false));
+        ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel, true));
 
-        esp_lcd_panel_init(panel);
-        esp_lcd_panel_invert_color(panel, DISPLAY_INVERT_COLOR);
-        esp_lcd_panel_swap_xy(panel, DISPLAY_SWAP_XY);
-        esp_lcd_panel_mirror(panel, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
-        display_ = new OttoEmojiDisplay(panel_io, panel,
+        uint8_t data_0x62[] = { 0x18, 0x0D, 0x71, 0xED, 0x70, 0x70, 0x18, 0x0F, 0x71, 0xEF, 0x70, 0x70 };
+        esp_lcd_panel_io_tx_param(panel_io, 0x62, data_0x62, sizeof(data_0x62));
+
+        uint8_t data_0x63[] = { 0x18, 0x11, 0x71, 0xF1, 0x70, 0x70, 0x18, 0x13, 0x71, 0xF3, 0x70, 0x70 };
+        esp_lcd_panel_io_tx_param(panel_io, 0x63, data_0x63, sizeof(data_0x63));
+
+        display_ = new SpiLcdDisplay(panel_io, panel,
                                     DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
     }
-
+    
     // 初始化摄像头：ov2640；
     // 根据正点原子官方示例参数
     void InitializeCamera() {
@@ -261,9 +256,12 @@ public:
     atk_dnesp32s3() : boot_button_(BOOT_BUTTON_GPIO) {
         InitializeI2c();
         InitializeSpi();
-        InitializeGc9d01nDisplay();
+        InitializeGc9a01Display();
         InitializeButtons();
         // InitializeCamera();
+        if (DISPLAY_BACKLIGHT_PIN != GPIO_NUM_NC) {
+            GetBacklight()->RestoreBrightness();
+        }
     }
 
     virtual Led* GetLed() override {
@@ -271,7 +269,7 @@ public:
         return &led;
     }
 
-#if 0
+#if 0       // 老版的板子的调试方式
     virtual AudioCodec* GetAudioCodec() override {
         static Es8388AudioCodec audio_codec(
             i2c_bus_, 
@@ -300,6 +298,11 @@ public:
     }
 #endif
     
+    virtual Backlight* GetBacklight() override {
+        static PwmBacklight backlight(DISPLAY_BACKLIGHT_PIN, DISPLAY_BACKLIGHT_OUTPUT_INVERT);
+        return &backlight;
+    }
+
     virtual Display* GetDisplay() override {
         return display_;
     }

@@ -194,6 +194,7 @@ int GloableVar::get_gloable_var() {
     } else {
         url += "var";
     }
+    url += "?deviceId=" + SystemInfo::GetMacAddress();
 
     auto http = std::unique_ptr<Http>(ota.SetupHttp());
 

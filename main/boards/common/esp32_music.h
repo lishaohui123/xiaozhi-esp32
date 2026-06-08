@@ -111,7 +111,8 @@ public:
     virtual bool Play() override;
     virtual bool Play(const std::string& music_url, int repeat) override;
     virtual bool PlayVoice(const std::string& music_url, int repeat) override;
-    virtual bool Play2(const std::string& music_url) override;
+    virtual bool PlayHdAudio(const std::string &audio_url)override;
+    virtual bool Play2(const std::string &music_url) override;
     virtual bool Stop() override;
     virtual std::string GetDownloadResult() override;
     virtual std::string GetWorkName() override;

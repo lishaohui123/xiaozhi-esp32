@@ -541,8 +541,8 @@ void IOT::SPI_CS1_init(void)
 
 
 
-void IOT::BACKL0_init(void)
-{
+void IOT::BACKL0_init(void) {
+#if 0
     gpio_config_t gpio_init_struct = {0};
 
     gpio_init_struct.intr_type = GPIO_INTR_DISABLE;         /* 失能引脚中断 */
@@ -552,7 +552,17 @@ void IOT::BACKL0_init(void)
     gpio_init_struct.pin_bit_mask = 1ull << BACKL0_GPIO_PIN;   /* 设置的引脚的位掩码 */
     gpio_config(&gpio_init_struct);                         /* 配置GPIO */
 
-    BACKL0(0);                                              /* 关闭屏0背光 */
+    BACKL0(0); /* 关闭屏0背光 */
+#endif
+    gpio_config_t bk_cfg = {
+        .pin_bit_mask = 1ULL << BACKL0_GPIO_PIN,
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    gpio_config(&bk_cfg);
+    gpio_set_level(BACKL0_GPIO_PIN, 1);   // 高电平点亮背光
 }
 
 
@@ -1509,14 +1519,19 @@ void IOT::TFT_init(void)	//GC9A01
     
     lcd_self.dir = 0;
     lcd_self.wr = LCD_NUM_WR;                                       /* 配置WR引脚 */
-    lcd_self.cs = LCD_NUM_CS1;                                       /* 配置CS引脚 */
+    lcd_self.cs = GPIO_NUM_21; // LCD_NUM_CS1; /* 配置CS引脚 */
+    lcd_self.wramcmd = 0x2C;
+    lcd_self.setxcmd = 0x2A;
+    lcd_self.setycmd = 0x2B;
+    lcd_self.width  = 240;
+    lcd_self.height = 240;
     
     gpio_config_t gpio_init_struct;
 
     /* SPI驱动接口配置 */
     spi_device_interface_config_t devcfg = {
         .mode = 0,                                                  /* SPI模式0 */
-        .clock_speed_hz = 60 * 10 * 1000,                         /* SPI时钟 */
+        .clock_speed_hz = 20 * 1000 * 1000,                         /* SPI时钟 */
         .spics_io_num = lcd_self.cs,                                /* SPI设备引脚 */
         .queue_size = 7,                                            /* 事务队列尺寸 7个 */
     };
@@ -1534,7 +1549,7 @@ void IOT::TFT_init(void)	//GC9A01
     gpio_config(&gpio_init_struct);                                 /* 引脚配置 */
 
     lcd_hard_reset();                                               /* LCD硬件复位 */
-
+#if 0
      lcd_init_cmd_t ili_init_cmds[] =
     {
         {0xEF, {0}, 0x80},
@@ -1589,7 +1604,17 @@ void IOT::TFT_init(void)	//GC9A01
         {0x11, {0}, 1},
         {0, {0}, 0xff},
     };
-
+#endif
+    lcd_init_cmd_t ili_init_cmds[] = {
+         {0xFE, {0}, 0},                       // 解锁
+         {0xEF, {0}, 0},    {0x36, {0x08}, 1}, // 地址模式
+         {0x3A, {0x05}, 1},                    // 16 位色
+         {0x21, {0}, 0x80},                    // 反转显示
+         {0x11, {0}, 0x80},                    // 退出睡眠
+         {0x29, {0}, 0x80},                    // 开显示
+         {0, {0}, 0xFF},
+     };
+     
 	while (ili_init_cmds[cmd].databytes != 0xff)
     {
         lcd_write_cmd(ili_init_cmds[cmd].cmd);

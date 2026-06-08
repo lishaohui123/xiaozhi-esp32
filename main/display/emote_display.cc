@@ -241,7 +241,7 @@ static void SetupUI(const gfx_handle_t engine_handle, EmoteDisplay* const displa
     g_obj_label_toast = gfx_label_create(engine_handle);
     gfx_obj_align(g_obj_label_toast, GFX_ALIGN_TOP_MID, 0, 20);
     gfx_obj_set_size(g_obj_label_toast, 200, 40);
-    gfx_label_set_text(g_obj_label_toast, Lang::Strings::INITIALIZING);
+    // gfx_label_set_text(g_obj_label_toast, Lang::Strings::INITIALIZING);、
     gfx_label_set_color(g_obj_label_toast, GFX_COLOR_HEX(0xFFFFFF));
     gfx_label_set_text_align(g_obj_label_toast, GFX_TEXT_ALIGN_CENTER);
     gfx_label_set_long_mode(g_obj_label_toast, GFX_LABEL_LONG_SCROLL);

@@ -272,6 +272,7 @@ esp_err_t VoiceCall::initMqtt(const std::string& device_id, const std::string& d
     mqtt_->Subscribe("device/" + m_device_info.device_id + "/alarm");
     mqtt_->Subscribe("device/" + m_device_info.device_id + "/works");
     mqtt_->Subscribe("device/" + m_device_info.device_id + "/audio");
+    mqtt_->Subscribe("social/" + m_device_info.device_id + "/hd");
     
     ESP_LOGI(TAG, "VoiceCall initialized successfully");
     return ESP_OK;
@@ -638,6 +639,13 @@ void VoiceCall::handle_mqtt_message(const char* topic, const char* payload, int 
         return;
     }
 
+    char social_hd_topic[64];
+    snprintf(social_hd_topic, sizeof(social_hd_topic), TOPIC_SOCIAL_HD_TEMPLATE, m_device_info.device_id.c_str());
+    if (strcmp(topic, social_hd_topic) == 0) {
+        handle_social_hd(payload);
+        return;
+    }
+
     ESP_LOGW(TAG, "Unhandled MQTT topic: %s", topic);
 }
 
@@ -849,6 +857,62 @@ void VoiceCall::handle_device_audio(const char* payload) {
         auto music = Board::GetInstance().GetMusic();
         music->Play2(audio_url);
     }
+}
+
+/*********************************************
+* 处理小龙的朋友之间的互动，戳一下、送爱心、留言等操作
+*********************************************/
+void VoiceCall::handle_social_hd(const char* payload) {
+    if (!payload) {
+        ESP_LOGE(TAG, "Invalid  social hu dong payload");
+        return;
+    }
+
+    ESP_LOGI(TAG, "Handling play audio: %s", payload);
+
+    cJSON* root = cJSON_Parse(payload);
+    if (!root) {
+        ESP_LOGE(TAG, "Failed to parse social hu dong payload");
+        return;
+    }
+
+    std::string hd_type = std::string(cJSON_GetObjectItem(root, "hdType")->valuestring);
+
+    if (m_udp_receive_task_running || m_udp_send_task_running) {
+        ESP_LOGI(TAG, "正在通话中，朋友之间的互动不响应");
+    }
+    else {
+        std::string friend_name = std::string(cJSON_GetObjectItem(root, "friendName")->valuestring);
+        std::string city = std::string(cJSON_GetObjectItem(root, "city")->valuestring);
+
+        if (hd_type == "chuo") {
+            std::string s = "小主人，你来自" + city + "的好朋友" + friend_name + "戳了你一下！快去给他回复吧。";
+            auto& alarm_manager = AlarmManager::GetInstance();
+            alarm_manager.PlayTtsAudioStreamVoice(s, 1);
+        }
+
+        if (hd_type == "love") {
+            std::string s = "小主人，你来自" + city + "的好朋友" + friend_name + "给你送了一个爱心！快去给他回复吧。";
+            auto& alarm_manager = AlarmManager::GetInstance();
+            alarm_manager.PlayTtsAudioStreamVoice(s, 1);
+        }
+
+        if (hd_type == "audio") {
+            std::string s = "小主人，你来自" + city + "的好朋友" + friend_name + "给你留言了！留言的内容如下。";
+            auto& alarm_manager = AlarmManager::GetInstance();
+            alarm_manager.PlayTtsAudioStreamVoice(s, 1);
+
+            vTaskDelay(pdMS_TO_TICKS(3000));
+
+            std::string recordId = std::string(cJSON_GetObjectItem(root, "id")->valuestring);
+            std::string audio_url = std::format("{}audio?recordId={}", OTA_URI, recordId);
+
+            auto music = Board::GetInstance().GetMusic();
+            music->PlayHdAudio(audio_url);
+        }
+    }
+
+    cJSON_Delete(root);
 }
 
 /***********************************************************************************************

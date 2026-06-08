@@ -183,7 +183,7 @@ static const gc9d01n_lcd_init_cmd_t vendor_specific_init_default[] = {
     {0x8D, (uint8_t[]){0xFF}, 1, 0},
     {0x8E, (uint8_t[]){0xFF}, 1, 0},
     {0x8F, (uint8_t[]){0xFF}, 1, 0},
-    {0x3A, (uint8_t[]){0x05}, 1, 0},
+    // {0x3A, (uint8_t[]){0x05}, 1, 0},
     {0xEC, (uint8_t[]){0x01}, 1, 0},
     {0x74, (uint8_t[]){0x02, 0x0E, 0x00, 0x00, 0x00, 0x00, 0x00}, 7, 0},
     {0x98, (uint8_t[]){0x3E}, 1, 0},
@@ -210,7 +210,7 @@ static const gc9d01n_lcd_init_cmd_t vendor_specific_init_default[] = {
     {0xF3, (uint8_t[]){0x52, 0xA4, 0x7F, 0x33, 0x34, 0xDF}, 6, 0},
 
     // {0x20, (uint8_t[]){0x00}, 0, 0},
-    {0x36, (uint8_t[]){0x00}, 1, 0},
+    // {0x36, (uint8_t[]){0x00}, 1, 0},
     {0x11, (uint8_t[]){0x00}, 0, 200},
     {0x29, (uint8_t[]){0x00}, 0, 0},
     {0x2C, (uint8_t[]){0x00}, 0, 20},

@@ -655,7 +655,7 @@ void Application::InitializeProtocol() {
             auto emotion = cJSON_GetObjectItem(root, "emotion");
             if (cJSON_IsString(emotion)) {
                 Schedule([this, display, emotion_str = std::string(emotion->valuestring)]() {
-                    // display->SetEmotion(emotion_str.c_str());
+                    display->SetEmotion(emotion_str.c_str());
                 });
             }
         } else if (strcmp(type->valuestring, "mcp") == 0) {
@@ -737,9 +737,9 @@ void Application::ShowActivationCode(const std::string& code, const std::string&
 
 void Application::Alert(const char* status, const char* message, const char* emotion, const std::string_view& sound) {
     ESP_LOGW(TAG, "Alert [%s] %s: %s", emotion, status, message);
-    // auto display = Board::GetInstance().GetDisplay();
+    auto display = Board::GetInstance().GetDisplay();
     // display->SetStatus(status);
-    // display->SetEmotion(emotion);
+    display->SetEmotion(emotion);
     // display->SetChatMessage("system", message);
     if (!sound.empty()) {
         audio_service_.PlaySound(sound);
@@ -748,9 +748,9 @@ void Application::Alert(const char* status, const char* message, const char* emo
 
 void Application::DismissAlert() {
     if (GetDeviceState() == kDeviceStateIdle) {
-        // auto display = Board::GetInstance().GetDisplay();
+        auto display = Board::GetInstance().GetDisplay();
         // display->SetStatus(Lang::Strings::STANDBY);
-        // display->SetEmotion("neutral");
+        display->SetEmotion("neutral");
         // display->SetChatMessage("system", "");
     }
 }
@@ -898,7 +898,7 @@ void Application::HandleStateChangedEvent() {
     clock_ticks_ = 0;
 
     auto& board = Board::GetInstance();
-    // auto display = board.GetDisplay();
+    auto display = board.GetDisplay();
     auto led = board.GetLed();
     led->OnStateChanged();
     
@@ -906,13 +906,13 @@ void Application::HandleStateChangedEvent() {
         case kDeviceStateUnknown:
         case kDeviceStateIdle:
             // display->SetStatus(Lang::Strings::STANDBY);
-            // display->SetEmotion("neutral");
+            display->SetEmotion("neutral");
             audio_service_.EnableVoiceProcessing(false);
             audio_service_.EnableWakeWordDetection(true);
             break;
         case kDeviceStateConnecting:
             // display->SetStatus(Lang::Strings::CONNECTING);
-            // display->SetEmotion("neutral");
+            display->SetEmotion("neutral");
             // display->SetChatMessage("system", "");
 
             /****************************
@@ -924,7 +924,7 @@ void Application::HandleStateChangedEvent() {
             break;
         case kDeviceStateListening:
             // display->SetStatus(Lang::Strings::LISTENING);
-            // display->SetEmotion("neutral");
+            display->SetEmotion("neutral");
 
             // Make sure the audio processor is running
             if (!audio_service_.IsAudioProcessorRunning()) {

@@ -1090,6 +1090,14 @@ bool Esp32Music::Play(const std::string& music_url, int repeat) {
     return true;
 }
 
+/***********************************
+ * 该函数是为了响应小龙和好友之间的留言互动
+ * 播放好友的留言
+ ***********************************/
+bool Esp32Music::PlayHdAudio(const std::string& audio_url) {
+    return PlayVoice(audio_url, 1);
+}
+
 /**************************************
  * 允许接收通过url来调用，进行
  * 语音的播报
