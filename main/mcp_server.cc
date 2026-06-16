@@ -124,7 +124,7 @@ void McpServer::AddCommonTools() {
 
     // Do not add custom tools here.
     // Custom tools must be added in the board's InitializeTools function.
-
+#if 0
     AddTool("self.get_device_status",
         "Provides the real-time information of the device, including the current status of the audio speaker, screen, battery, network, etc.\n"
         "Use this tool for: \n"
@@ -143,6 +143,36 @@ void McpServer::AddCommonTools() {
         [&board](const PropertyList& properties) -> ReturnValue {
             auto codec = board.GetAudioCodec();
             codec->SetOutputVolume(properties["volume"].value<int>());
+            GloableVar::update_gloable_var(properties["volume"].value<int>());
+            return true;
+        });
+#endif
+
+    AddTool("self.get_device_status",
+        "获取设备的实时状态信息，包括当前音频扬声器、屏幕、电池、网络等状态。\n"
+        "【重要】当用户询问当前音量（例如：“当前音量是多少？”、“声音多大？”）时，必须调用本工具来获取音量信息。\n"
+        "禁止使用 `self.audio_speaker.set_volume` 来查询音量。\n"
+        "本工具适用于：\n"
+        "1. 回答关于设备当前状态的问题（例如：音频扬声器当前音量是多少？）\n"
+        "2. 作为控制设备的第一步（例如：调大/调小扬声器音量等）",
+        PropertyList(),
+        [&board](const PropertyList& properties) -> ReturnValue {
+            return board.GetDeviceStatusJson();
+        });
+
+    AddTool("self.audio_speaker.set_volume", 
+        "设置音频扬声器的音量。本工具仅用于设置音量，不能用于查询当前音量。\n"
+        "如需查询当前音量，必须先调用 `self.get_device_status` 工具获取。\n"
+        "如果不知道当前音量，必须先调用 `self.get_device_status` 获取当前音量，再调用本工具进行调节。\n"
+        "示例：用户说“调大音量”→ 应先调用 `self.get_device_status` 获取当前音量，然后使用本工具设置新音量。\n"
+        "用户说“音量是多少？”→ 切勿调用本工具，应调用 `self.get_device_status` 代替。",
+        PropertyList({
+            Property("volume", kPropertyTypeInteger, 0, 100)
+        }), 
+        [&board](const PropertyList& properties) -> ReturnValue {
+            auto codec = board.GetAudioCodec();
+            codec->SetOutputVolume(properties["volume"].value<int>());
+            GloableVar::update_gloable_var(properties["volume"].value<int>());
             return true;
         });
 

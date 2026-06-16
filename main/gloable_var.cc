@@ -35,6 +35,9 @@ std::string GloableVar::app_id;
 std::string GloableVar::app_secret;
 std::string GloableVar::device_id;
 std::string GloableVar::work_detail_url;
+volatile int GloableVar::mode_realtime;
+int GloableVar::volume;
+
 // 定义新增的TTS静态变量
 std::string GloableVar::tts_api_url;
 std::string GloableVar::tts_api_key;
@@ -185,6 +188,32 @@ void GloableVar::init_ntp_time() {
     }
 }
 
+int GloableVar::update_gloable_var(int volume) {
+    Ota ota;
+    // std::string url = ota.GetCheckVersionUrl();
+    std::string url = OTA_URI;
+    if (url.back() != '/') {
+        url += "/var/set";
+    } else {
+        url += "var/set";
+    }
+    url += "?deviceId=" + SystemInfo::GetMacAddress() + "&volume=" + std::to_string(volume);
+
+    auto http = std::unique_ptr<Http>(ota.SetupHttp());
+
+    std::shared_ptr<Http> shared_http = std::move(http);
+    http_client_ = std::static_pointer_cast<HttpClient>(shared_http);
+    http_client_->SetKeepAlive(true);  // 启用 Keep-Alive
+
+    if (!http_client_->Open("GET", url)) {
+        ESP_LOGE(TAG, "Failed to open HTTP connection");
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "update gloable var successful");
+    return ESP_OK;
+}
+
 int GloableVar::get_gloable_var() {
     Ota ota;
     // std::string url = ota.GetCheckVersionUrl();
@@ -250,6 +279,18 @@ int GloableVar::get_gloable_var() {
     cJSON* workDetailUrl = cJSON_GetObjectItem(root, "workDetailUrl");
     if (cJSON_IsString(workDetailUrl) && workDetailUrl->valuestring) {
         work_detail_url = workDetailUrl->valuestring;
+    }
+
+    // 解析实时打断使能
+    cJSON* modeRealtime = cJSON_GetObjectItem(root, "modeRealtime");
+    if (cJSON_IsNumber(modeRealtime)) {
+        mode_realtime = modeRealtime->valueint;   // 获取整数值
+    }
+
+    // 解析用户在页面上设置的音量
+    cJSON* volume_item = cJSON_GetObjectItem(root, "volume");
+    if (cJSON_IsNumber(volume_item)) {
+        volume = volume_item->valueint;   // 获取整数值
     }
 
     cJSON_Delete(root);

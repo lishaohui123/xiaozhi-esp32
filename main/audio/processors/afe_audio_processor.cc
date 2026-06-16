@@ -10,6 +10,7 @@ AfeAudioProcessor::AfeAudioProcessor()
     event_group_ = xEventGroupCreate();
 }
 
+#if 0  // 原有代码，支持2通道
 void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srmodel_list_t* models_list) {
     codec_ = codec;
     frame_samples_ = frame_duration_ms * 16000 / 1000;
@@ -18,7 +19,7 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srm
     output_buffer_.reserve(frame_samples_);
 
     int ref_num = codec_->input_reference() ? 1 : 0;
-
+#if 0
     std::string input_format;
     for (int i = 0; i < codec_->input_channels() - ref_num; i++) {
         input_format.push_back('M');
@@ -26,6 +27,8 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srm
     for (int i = 0; i < ref_num; i++) {
         input_format.push_back('R');
     }
+#endif
+    std::string input_format = "MR";
 
     srmodel_list_t *models;
     if (models_list == nullptr) {
@@ -40,8 +43,7 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srm
     afe_config_t* afe_config = afe_config_init(input_format.c_str(), NULL, AFE_TYPE_VC, AFE_MODE_HIGH_PERF);
     afe_config->aec_mode = AEC_MODE_VOIP_HIGH_PERF;
     afe_config->vad_mode = VAD_MODE_0;
-    // afe_config->vad_min_noise_ms = 100;
-    afe_config->vad_min_noise_ms = 20;
+    afe_config->vad_min_noise_ms = 800;
     if (vad_model_name != nullptr) {
         afe_config->vad_model_name = vad_model_name;
     }
@@ -69,7 +71,7 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srm
     afe_data_ = afe_iface_->create_from_config(afe_config);
     
     // 使用静态任务创建方式
-    const size_t stack_size = 4096;
+    const size_t stack_size = 1024 * 8;
     
     // 分配任务栈内存
     task_stack_ = (StackType_t*)heap_caps_malloc(stack_size * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
@@ -96,6 +98,242 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srm
 
     assert(task_handle_ != nullptr);
 }
+#endif
+
+#if 1  // 支持2通道，增加了更多的功能
+void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srmodel_list_t* models_list) {
+    codec_ = codec;
+    frame_samples_ = frame_duration_ms * 16000 / 1000;
+
+    // Pre-allocate output buffer capacity
+    output_buffer_.reserve(frame_samples_);
+
+    int ref_num = codec_->input_reference() ? 1 : 0;
+#if 0
+    std::string input_format;
+    for (int i = 0; i < codec_->input_channels() - ref_num; i++) {
+        input_format.push_back('M');
+    }
+    for (int i = 0; i < ref_num; i++) {
+        input_format.push_back('R');
+    }
+#endif
+    std::string input_format = "MR";
+
+    srmodel_list_t *models;
+    if (models_list == nullptr) {
+        models = esp_srmodel_init("model");
+    } else {
+        models = models_list;
+    }
+
+    char* ns_model_name = esp_srmodel_filter(models, ESP_NSNET_PREFIX, NULL);
+    char* vad_model_name = esp_srmodel_filter(models, ESP_VADN_PREFIX, NULL);
+    
+    afe_config_t* afe_config = afe_config_init(input_format.c_str(), NULL, AFE_TYPE_VC, AFE_MODE_HIGH_PERF);
+    afe_config->aec_mode = AEC_MODE_SR_HIGH_PERF;
+    afe_config->vad_mode = VAD_MODE_0;
+    afe_config->vad_min_noise_ms = 800;
+    if (vad_model_name != nullptr) {
+        afe_config->vad_model_name = vad_model_name;
+    }
+
+    if (ns_model_name != nullptr) {
+        afe_config->ns_init = true;
+        afe_config->ns_model_name = ns_model_name;
+        afe_config->afe_ns_mode = AFE_NS_MODE_NET;
+    } else {
+        afe_config->ns_init = false;
+    }
+
+    afe_config->agc_init = false;
+    afe_config->memory_alloc_mode = AFE_MEMORY_ALLOC_MORE_PSRAM;
+
+#ifdef CONFIG_USE_DEVICE_AEC
+    afe_config->aec_init = true;
+    afe_config->vad_init = true;
+#else
+    afe_config->aec_init = false;
+    afe_config->vad_init = true;
+#endif
+
+    /******************************************
+     * 为了让小智的麦克风更加的灵敏，增加了下面的功能设置
+     * 补充：
+     * 没有启用双麦克风波束成形，现在采用的是MR
+     ******************************************/
+    // 禁用唤醒词检测（重要！）
+    afe_config->wakenet_init = false;
+    afe_config->wakenet_model_name = NULL;
+
+    // 启用自动增益控制（AGC）并调高增益
+    afe_config->agc_init = true;
+    afe_config->agc_mode = AFE_AGC_MODE_WEBRTC;      // 使用 WebRTC AGC
+    afe_config->agc_compression_gain_db = 18;        // 提高增益（默认9，远场可12~18）
+    afe_config->agc_target_level_dbfs = -6;           // 目标电平 -3 dBFS
+
+    // 噪声抑制：改用温和的 WebRTC NS，避免神经网络抑制弱语音
+    afe_config->ns_init = true;
+    afe_config->afe_ns_mode = AFE_NS_MODE_WEBRTC;
+    afe_config->ns_model_name = NULL;
+
+    // 调整 VAD 参数，降低远场语音触发的门槛
+    afe_config->vad_min_speech_ms = 64;   // 语音最短持续150ms，避免短语音被丢弃
+    afe_config->vad_min_noise_ms = 1200;
+    afe_config->vad_delay_ms = 800;        // 延迟200ms，让VAD能缓存语音开头
+
+    afe_iface_ = esp_afe_handle_from_config(afe_config);
+    afe_data_ = afe_iface_->create_from_config(afe_config);
+    
+    // 使用静态任务创建方式
+    const size_t stack_size = 1024 * 8;
+    
+    // 分配任务栈内存
+    task_stack_ = (StackType_t*)heap_caps_malloc(stack_size * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
+    assert(task_stack_ != nullptr);
+    
+    // 分配任务控制块内存
+    task_buffer_ = (StaticTask_t*)heap_caps_malloc(sizeof(StaticTask_t), MALLOC_CAP_INTERNAL);
+    assert(task_buffer_ != nullptr);
+    
+    // 创建静态任务
+    task_handle_ = xTaskCreateStatic(
+        [](void* arg) {
+            auto this_ = (AfeAudioProcessor*)arg;
+            this_->AudioProcessorTask();
+            vTaskDelete(NULL);
+        },
+        "audio_communication",
+        stack_size,
+        this,
+        3,
+        task_stack_,
+        task_buffer_
+    );
+
+    assert(task_handle_ != nullptr);
+}
+#endif
+
+/****************************
+ * 为了解决双麦克风不够灵敏的问题，
+ * 增加了双麦克风波束成形
+ ****************************/
+#if 0
+void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srmodel_list_t* models_list) {
+    codec_ = codec;
+    frame_samples_ = frame_duration_ms * 16000 / 1000;
+
+    // Pre-allocate output buffer capacity
+    output_buffer_.reserve(frame_samples_);
+
+    int ref_num = codec_->input_reference() ? 1 : 0;
+
+    // std::string input_format;
+    // for (int i = 0; i < codec_->input_channels() - ref_num; i++) {
+    //     input_format.push_back('M');
+    // }
+    // for (int i = 0; i < ref_num; i++) {
+    //     input_format.push_back('R');
+    // }
+
+    std::string input_format = "MMR";
+
+    srmodel_list_t *models;
+    if (models_list == nullptr) {
+        models = esp_srmodel_init("model");
+    } else {
+        models = models_list;
+    }
+
+    char* ns_model_name = esp_srmodel_filter(models, ESP_NSNET_PREFIX, NULL);
+    char* vad_model_name = esp_srmodel_filter(models, ESP_VADN_PREFIX, NULL);
+    
+    // 1. 创建基础配置，使用 VC 模式（语音通信）和高性能模式
+    // afe_config_t* afe_config = afe_config_init(input_format.c_str(), NULL, AFE_TYPE_VC, AFE_MODE_HIGH_PERF);
+    afe_config_t* afe_config = afe_config_init(input_format.c_str(), NULL, AFE_TYPE_SR, AFE_MODE_HIGH_PERF);
+
+    // 2. 禁用唤醒词检测（重要！）
+    afe_config->wakenet_init = false;
+    afe_config->wakenet_model_name = NULL;
+
+    // 2. AEC 配置（保留高性能 VoIP 模式）
+    afe_config->aec_mode = AEC_MODE_VOIP_HIGH_PERF;
+    
+    // 3. VAD 基础配置
+    afe_config->vad_mode = VAD_MODE_0;
+    afe_config->vad_min_noise_ms = 1200;
+    if (vad_model_name != nullptr) {
+        afe_config->vad_model_name = vad_model_name;
+    }
+
+    // ========== 核心远场优化修改 ==========
+    // 3.1 启用波束成形（双麦克风阵列，关键！）
+    afe_config->se_init = true;   // Speech Enhancement，即多通道波束成形
+    
+    // 3.2 启用自动增益控制（AGC）并调高增益
+    afe_config->agc_init = false;
+    afe_config->agc_mode = AFE_AGC_MODE_WEBRTC;      // 使用 WebRTC AGC
+    afe_config->agc_compression_gain_db = 12;        // 提高增益（默认9，远场可12~18）
+    afe_config->agc_target_level_dbfs = 3;           // 目标电平 -3 dBFS
+    
+    // 3.3 噪声抑制：改用温和的 WebRTC NS，避免神经网络抑制弱语音
+    afe_config->ns_init = true;
+    afe_config->afe_ns_mode = AFE_NS_MODE_WEBRTC;    // 关键：不用神经网络模型
+    afe_config->ns_model_name = NULL;                // WebRTC NS 不需要模型文件
+    
+    // 3.4 调整 VAD 参数，降低远场语音触发的门槛
+    afe_config->vad_min_speech_ms = 64;   // 语音最短持续150ms，避免短语音被丢弃
+    afe_config->vad_min_noise_ms = 1200;
+    afe_config->vad_delay_ms = 500;        // 延迟200ms，让VAD能缓存语音开头
+    
+    // 3.5 内存分配策略（原代码已有）
+    afe_config->memory_alloc_mode = AFE_MEMORY_ALLOC_MORE_PSRAM;
+    
+    // 3.6 处理 AEC 和 VAD 互斥（根据宏或远场场景，建议关闭硬件AEC，启用VAD）
+#ifdef CONFIG_USE_DEVICE_AEC
+    afe_config->aec_init = true;
+    afe_config->vad_init = false;
+#else
+    // 远场场景下，强烈建议使用 VAD 而非依赖唤醒词检测
+    afe_config->aec_init = false;    // 如无硬件回采，关闭AEC避免副作用
+    afe_config->vad_init = true;
+#endif
+
+    // 3.7 调用配置检查函数，自动修正冲突参数（例如双麦时自动调整通道）
+    afe_config = afe_config_check(afe_config);
+    
+    // ========== 创建 AFE 实例 ==========
+    afe_iface_ = esp_afe_handle_from_config(afe_config);
+    afe_data_ = afe_iface_->create_from_config(afe_config);
+    
+    // 释放不再需要的配置内存（根据 esp_afe 要求，config 在 create 后可释放）
+    // 注意：afe_config 可能被 afe_config_check 重新分配，需确保正确释放
+    // 具体释放方式取决于 esp_afe 版本，通常调用 afe_config_free(afe_config) 即可
+    afe_config_free(afe_config);
+    
+    // 创建静态任务（与原有代码相同）
+    const size_t stack_size = 1024 * 16;
+    task_stack_ = (StackType_t*)heap_caps_malloc(stack_size * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
+    assert(task_stack_ != nullptr);
+    task_buffer_ = (StaticTask_t*)heap_caps_malloc(sizeof(StaticTask_t), MALLOC_CAP_INTERNAL);
+    assert(task_buffer_ != nullptr);
+    task_handle_ = xTaskCreateStatic(
+        [](void* arg) {
+            auto this_ = (AfeAudioProcessor*)arg;
+            this_->AudioProcessorTask();
+            vTaskDelete(NULL);
+        },
+        "audio_communication",
+        stack_size,
+        this,
+        3,
+        task_stack_,
+        task_buffer_
+    );
+    assert(task_handle_ != nullptr);
+}
+#endif
 
 AfeAudioProcessor::~AfeAudioProcessor() {
     if (afe_data_ != nullptr) {
@@ -212,7 +450,7 @@ void AfeAudioProcessor::AudioProcessorTask() {
 void AfeAudioProcessor::EnableDeviceAec(bool enable) {
     if (enable) {
 #if CONFIG_USE_DEVICE_AEC
-        afe_iface_->disable_vad(afe_data_);
+        afe_iface_->enable_vad(afe_data_);
         afe_iface_->enable_aec(afe_data_);
 #else
         ESP_LOGE(TAG, "Device AEC is not supported");

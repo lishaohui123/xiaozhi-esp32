@@ -11,6 +11,9 @@ public:
     static std::string app_secret;
     static std::string device_id;
     static std::string work_detail_url;
+    static volatile int mode_realtime;
+    static int volume;
+
     static std::string tts_api_url;
     static std::string tts_api_key;
     static std::string alarm_app_id;
@@ -26,6 +29,7 @@ public:
     static void init_ntp_time();
     static int get_gloable_var();
     static int get_alarm_var();
+    static int update_gloable_var(int volume);
 
 private:
     static std::shared_ptr<HttpClient> http_client_;   // 复用 HTTP 客户端

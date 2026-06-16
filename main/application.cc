@@ -60,6 +60,10 @@ Application::~Application() {
         esp_timer_delete(clock_timer_handle_);
     }
     vEventGroupDelete(event_group_);
+
+    if (vad_silence_debounce_timer_ != nullptr) {
+        xTimerDelete(vad_silence_debounce_timer_, 0);
+    }
 }
 
 bool Application::SetDeviceState(DeviceState state) {
@@ -92,8 +96,16 @@ void Application::Initialize() {
     callbacks.on_wake_word_detected = [this](const std::string& wake_word) {
         xEventGroupSetBits(event_group_, MAIN_EVENT_WAKE_WORD_DETECTED);
     };
+
+#if 0
     callbacks.on_vad_change = [this](bool speaking) {
         xEventGroupSetBits(event_group_, MAIN_EVENT_VAD_CHANGE);
+    };
+    audio_service_.SetCallbacks(callbacks);
+#endif
+
+    callbacks.on_vad_change = [this](bool speaking) {
+        HandleVadStateChange(speaking);   // 改为防抖处理
     };
     audio_service_.SetCallbacks(callbacks);
 
@@ -109,6 +121,18 @@ void Application::Initialize() {
     auto& mcp_server = McpServer::GetInstance();
     mcp_server.AddCommonTools();
     mcp_server.AddUserOnlyTools();
+
+
+    // 创建 VAD 静音防抖定时器（单次，延迟 300ms，可根据实际调整）
+    vad_silence_debounce_timer_ = xTimerCreate(
+        "vad_silence_timer",
+        pdMS_TO_TICKS(500),     // 300ms 防抖，可调至 200~500ms
+        pdFALSE,                // 单次触发
+        this,
+        VadSilenceDebounceCallback
+    );
+    assert(vad_silence_debounce_timer_ != nullptr);
+
 
     // Set network event callback for UI updates and network state handling
     board.SetNetworkEventCallback([this](NetworkEvent event, const std::string& data) {
@@ -516,6 +540,8 @@ void Application::InitializeMySystem() {
     else {
         ESP_LOGE(TAG, "读取全局环境变量失败"); 
     }
+
+    Board::GetInstance().GetAudioCodec()->SetOutputVolume(GloableVar::volume);
     vTaskDelay(pdMS_TO_TICKS(500));
 
     if (GloableVar::get_alarm_var() == ESP_OK) {
@@ -796,7 +822,12 @@ void Application::HandleToggleChatEvent() {
             }
         }
 
-        SetListeningMode(aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime);
+        if (GloableVar::mode_realtime == 1) {
+            SetListeningMode(aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime);
+        }
+        else {
+            SetListeningMode(kListeningModeAutoStop);
+        }
     } else if (state == kDeviceStateSpeaking) {
         AbortSpeaking(kAbortReasonNone);
     } else if (state == kDeviceStateListening) {
@@ -878,7 +909,12 @@ void Application::HandleWakeWordDetectedEvent() {
         }
         // Set the chat state to wake word detected
         protocol_->SendWakeWordDetected(wake_word);
-        SetListeningMode(aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime);
+        if (GloableVar::mode_realtime == 1) {
+            SetListeningMode(aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime);
+        }
+        else {
+            SetListeningMode(kListeningModeAutoStop);
+        }
 #else
         // Set flag to play popup sound after state changes to listening
         // (PlaySound here would be cleared by ResetDecoder in EnableVoiceProcessing)
@@ -890,6 +926,18 @@ void Application::HandleWakeWordDetectedEvent() {
     } else if (state == kDeviceStateActivating) {
         // Restart the activation check if the wake word is detected during activation
         SetDeviceState(kDeviceStateIdle);
+    }
+}
+
+/*****************************
+ * 专门为了响应用户切换实时打断模式
+ *****************************/
+void Application::SetModeRealtime() {
+    if (GloableVar::mode_realtime == 1) {
+        listening_mode_ = aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime;
+    }
+    else {
+        listening_mode_ = kListeningModeAutoStop;
     }
 }
 
@@ -1072,7 +1120,12 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
         }
         // Set the chat state to wake word detected
         protocol_->SendWakeWordDetected(wake_word);
-        SetListeningMode(aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime);
+        if (GloableVar::mode_realtime == 1) {
+            SetListeningMode(aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime);
+        }
+        else {
+            SetListeningMode(kListeningModeAutoStop);
+        }
 #else
         // Set flag to play popup sound after state changes to listening
         // (PlaySound here would be cleared by ResetDecoder in EnableVoiceProcessing)
@@ -1160,6 +1213,41 @@ void Application::ResetProtocol() {
     });
 }
 
+void Application::HandleVadStateChange(bool speaking) {
+    if (speaking) {
+        // 说话开始：取消任何待处理的静音结束定时器
+        if (vad_silence_debounce_timer_ != nullptr && 
+            xTimerIsTimerActive(vad_silence_debounce_timer_)) {
+            xTimerStop(vad_silence_debounce_timer_, 0);
+        }
+        // 立即通知 LED 等 UI 更新（原 MAIN_EVENT_VAD_CHANGE 的用途）
+        xEventGroupSetBits(event_group_, MAIN_EVENT_VAD_CHANGE);
+    } else {
+        // 静音可能开始：启动或重置防抖定时器
+        if (vad_silence_debounce_timer_ != nullptr) {
+            xTimerReset(vad_silence_debounce_timer_, 0);
+        } else {
+            // 降级：无定时器则立即通知
+            xEventGroupSetBits(event_group_, MAIN_EVENT_VAD_CHANGE);
+        }
+    }
+}
+
+void Application::VadSilenceDebounceCallback(TimerHandle_t xTimer) {
+    Application* app = static_cast<Application*>(pvTimerGetTimerID(xTimer));
+    if (app) {
+        app->OnVadSilenceConfirmed();
+    }
+}
+
+void Application::OnVadSilenceConfirmed() {
+    // 真正的静音持续超过防抖时间，确认说话结束
+    // 设置一个专门的事件（或者复用 MAIN_EVENT_VAD_CHANGE 但增加标志）
+    // 这里我们复用 MAIN_EVENT_VAD_CHANGE，但为了区分可新增一个事件
+    // 为了简单，直接调用原有的 VAD CHANGE 处理，并在主循环中根据状态执行动作
+    xEventGroupSetBits(event_group_, MAIN_EVENT_VAD_CHANGE);
+    // 如果你需要专门处理静音确认，可以定义 MAIN_EVENT_VAD_SILENCE_CONFIRMED
+}
 
 void Application::AddAudioData(AudioStreamPacket&& packet) {
     // 检查设备状态和编解码器状态

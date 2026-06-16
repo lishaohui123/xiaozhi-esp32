@@ -601,7 +601,7 @@ elseif(CONFIG_BOARD_TYPE_HU_087)
     set(BUILTIN_TEXT_FONT font_puhui_basic_14_1)
     set(BUILTIN_ICON_FONT font_awesome_14_1)
 endif()
-set(BOARD_TYPE "chigel")
+set(BOARD_TYPE "chigel2")
 
 file(GLOB BOARD_SOURCES
     # ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}/*.cc

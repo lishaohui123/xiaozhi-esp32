@@ -96,28 +96,6 @@ public:
     }
 };
 
-class BotEs8311AudioCodec : public Es8311AudioCodec {
-private:    
-
-public:
-    BotEs8311AudioCodec(void* i2c_master_handle, i2c_port_t i2c_port, int input_sample_rate, int output_sample_rate,
-                        gpio_num_t mclk, gpio_num_t bclk, gpio_num_t ws, gpio_num_t dout, gpio_num_t din,
-                        gpio_num_t pa_pin, uint8_t es8311_addr, bool use_mclk = true)
-        : Es8311AudioCodec(i2c_master_handle, i2c_port, input_sample_rate, output_sample_rate,
-                             mclk,  bclk,  ws,  dout,  din,pa_pin,  es8311_addr,  use_mclk = true) {}
-
-    void EnableOutput(bool enable) override {
-        if (enable == output_enabled_) {
-            return;
-        }
-        if (enable) {
-            Es8311AudioCodec::EnableOutput(enable);
-        } else {
-           // Nothing todo because the display io and PA io conflict
-        }
-    }
-};
-
 class atk_dnesp32s3 : public WifiBoard {
 private:
     i2c_master_bus_handle_t i2c_bus_;

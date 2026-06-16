@@ -1,6 +1,7 @@
 #include "audio_codec.h"
 #include "board.h"
 #include "settings.h"
+#include "gloable_var.h"
 
 #include <esp_log.h>
 #include <cstring>
@@ -71,6 +72,32 @@ bool AudioCodec::InputData(std::vector<int16_t>& data) {
     return false;
 }
 
+// 现在音量的控制在后端控制
+void AudioCodec::Start() {
+    output_volume_ = GloableVar::volume;
+    if (output_volume_ <= 10) {
+        ESP_LOGW(TAG, "Output volume value (%d) is too small, setting to default (10)", output_volume_);
+        output_volume_ = 10;
+    }
+    if (output_volume_ >= 100) {
+        ESP_LOGW(TAG, "Output volume value (%d) is too big, setting to default (100)", output_volume_);
+        output_volume_ = 100;
+    }
+
+    if (tx_handle_ != nullptr) {
+        ESP_ERROR_CHECK(i2s_channel_enable(tx_handle_));
+    }
+
+    if (rx_handle_ != nullptr) {
+        ESP_ERROR_CHECK(i2s_channel_enable(rx_handle_));
+    }
+
+    EnableInput(true);
+    EnableOutput(true);
+    ESP_LOGI(TAG, "Audio codec started");
+}
+
+#if 0   // 原有的代码
 void AudioCodec::Start() {
     Settings settings("audio", false);
     output_volume_ = settings.GetInt("output_volume", output_volume_);
@@ -91,7 +118,7 @@ void AudioCodec::Start() {
     EnableOutput(true);
     ESP_LOGI(TAG, "Audio codec started");
 }
-
+#endif
 void AudioCodec::SetOutputVolume(int volume) {
     output_volume_ = volume;
     ESP_LOGI(TAG, "Set output volume to %d", output_volume_);

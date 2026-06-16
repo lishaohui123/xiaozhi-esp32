@@ -171,7 +171,7 @@ void AudioService::Start() {
     esp_timer_start_periodic(audio_power_timer_, 1000000);
 
     // 定义任务栈大小
-    const size_t audio_input_stack_size = CONFIG_USE_AUDIO_PROCESSOR ? (2048 * 3) : (2048 * 2);
+    const size_t audio_input_stack_size = CONFIG_USE_AUDIO_PROCESSOR ? (2048 * 8) : (2048 * 8);
     const size_t audio_output_stack_size = CONFIG_USE_AUDIO_PROCESSOR ? (2048 * 2) : 2048;
     const size_t opus_codec_stack_size = 2048 * 13;
 
@@ -286,7 +286,7 @@ void AudioService::Stop() {
     ESP_LOGI(TAG, "Audio service stopped");
 }
 
-#if 0 // 原有的代码
+#if 1 // 原有的代码，支持2通道的
 bool AudioService::ReadAudioData(std::vector<int16_t>& data, int sample_rate, int samples) {
     if (!codec_->input_enabled()) {
         esp_timer_stop(audio_power_timer_);
@@ -343,7 +343,8 @@ bool AudioService::ReadAudioData(std::vector<int16_t>& data, int sample_rate, in
 }
 #endif
 
-#if 0   // int channels = 2
+#if 0
+// MRMN 扩展为4通道，经过和硬件的测试是正确的
 bool AudioService::ReadAudioData(std::vector<int16_t>& data, int sample_rate, int samples) {
     if (!codec_->input_enabled()) {
         esp_timer_stop(audio_power_timer_);
@@ -351,46 +352,134 @@ bool AudioService::ReadAudioData(std::vector<int16_t>& data, int sample_rate, in
         codec_->EnableInput(true);
     }
 
+    int channels = codec_->input_channels();
+    const bool has_ref = codec_->input_reference();
+
     if (codec_->input_sample_rate() != sample_rate) {
-        int channels = 2;
+        // 需要重采样
         data.resize(samples * codec_->input_sample_rate() / sample_rate * channels);
         if (!codec_->InputData(data)) {
             return false;
         }
-        if (codec_->input_channels() == 2) {
-            auto mic_channel = std::vector<int16_t>(data.size() / channels);
-            auto reference_channel = std::vector<int16_t>(data.size() / channels);
-            for (size_t i = 0, j = 0; i < mic_channel.size(); ++i, j += channels) {
-                mic_channel[i] = data[j];
-                reference_channel[i] = data[j + 1];
-            }
-            auto resampled_mic = std::vector<int16_t>(input_resampler_.GetOutputSamples(mic_channel.size()));
-            auto resampled_reference = std::vector<int16_t>(reference_resampler_.GetOutputSamples(reference_channel.size()));
-            input_resampler_.Process(mic_channel.data(), mic_channel.size(), resampled_mic.data());
-            reference_resampler_.Process(reference_channel.data(), reference_channel.size(), resampled_reference.data());
-            data.resize(resampled_mic.size() + resampled_reference.size());
-            for (size_t i = 0, j = 0; i < resampled_mic.size(); ++i, j += 2) {
-                data[j] = resampled_mic[i];
-                data[j + 1] = resampled_reference[i];
+
+        if (has_ref) {
+            // 参考信号模式：分离麦克风和参考通道
+            if (channels == 2) {
+                // MR 模式：1 mic + 1 ref
+                auto mic_channel = std::vector<int16_t>(data.size() / 2);
+                auto ref_channel  = std::vector<int16_t>(data.size() / 2);
+                for (size_t i = 0, j = 0; i < mic_channel.size(); ++i, j += 2) {
+                    mic_channel[i] = data[j];       // Mic1
+                    ref_channel[i]  = data[j + 1];  // Ref1
+                }
+                if (bypass_aec_reference_.load()) {
+                    std::fill(ref_channel.begin(), ref_channel.end(), 0);
+                }
+                auto resampled_mic = std::vector<int16_t>(input_resampler_.GetOutputSamples(mic_channel.size()));
+                auto resampled_ref = std::vector<int16_t>(reference_resampler_.GetOutputSamples(ref_channel.size()));
+                input_resampler_.Process(mic_channel.data(), mic_channel.size(), resampled_mic.data());
+                reference_resampler_.Process(ref_channel.data(), ref_channel.size(), resampled_ref.data());
+                data.resize(resampled_mic.size() + resampled_ref.size());
+                for (size_t i = 0, j = 0; i < resampled_mic.size(); ++i, j += 2) {
+                    data[j]   = resampled_mic[i];
+                    data[j+1] = resampled_ref[i];
+                }
+                channels = 2;
+            } 
+            else if (channels == 4) {
+                // MRMN 模式：Mic1, Ref1, Mic2, Noise
+                // 提取为 MMR 格式：Mic1, Mic2, Ref1
+                const int total_frames = data.size() / 4;
+                std::vector<int16_t> mic1_data(total_frames);
+                std::vector<int16_t> ref1_data(total_frames);
+                std::vector<int16_t> mic2_data(total_frames);
+                
+                for (int i = 0; i < total_frames; ++i) {
+                    mic1_data[i] = data[i*4];       // Mic1 (通道0)
+                    ref1_data[i] = data[i*4 + 1];   // Ref1 (通道1)
+                    mic2_data[i] = data[i*4 + 2];   // Mic2 (通道2)
+                    // data[i*4 + 3] = Noise (通道3) - 丢弃
+                }
+                
+                if (bypass_aec_reference_.load()) {
+                    std::fill(ref1_data.begin(), ref1_data.end(), 0);
+                }
+                
+                // 分别重采样两路麦克风和参考信号
+                auto resampled_mic1 = std::vector<int16_t>(input_resampler_.GetOutputSamples(mic1_data.size()));
+                auto resampled_mic2 = std::vector<int16_t>(input_resampler_.GetOutputSamples(mic2_data.size()));
+                auto resampled_ref1 = std::vector<int16_t>(reference_resampler_.GetOutputSamples(ref1_data.size()));
+                
+                input_resampler_.Process(mic1_data.data(), mic1_data.size(), resampled_mic1.data());
+                input_resampler_.Process(mic2_data.data(), mic2_data.size(), resampled_mic2.data());
+                reference_resampler_.Process(ref1_data.data(), ref1_data.size(), resampled_ref1.data());
+                
+                // 交织为 MMR 格式：Mic1, Mic2, Ref1
+                const int out_frames = std::min({resampled_mic1.size(), 
+                                                 resampled_mic2.size(), 
+                                                 resampled_ref1.size()});
+                data.resize(out_frames * 3);
+                for (int i = 0; i < out_frames; ++i) {
+                    data[i*3]   = (i < resampled_mic1.size()) ? resampled_mic1[i] : 0;
+                    data[i*3+1] = (i < resampled_mic2.size()) ? resampled_mic2[i] : 0;
+                    data[i*3+2] = (i < resampled_ref1.size()) ? resampled_ref1[i] : 0;
+                }
+                channels = 3; // 输出变为 3 通道 MMR
+            } else {
+                // 其他通道数直接重采样所有通道
+                auto resampled = std::vector<int16_t>(input_resampler_.GetOutputSamples(data.size()));
+                input_resampler_.Process(data.data(), data.size(), resampled.data());
+                data = std::move(resampled);
             }
         } else {
-            auto resampled = std::vector<int16_t>(input_resampler_.GetOutputSamples(data.size()));
-            input_resampler_.Process(data.data(), data.size(), resampled.data());
-            data = std::move(resampled);
+            // 无参考信号模式
+            if (channels == 2) {
+                auto resampled = std::vector<int16_t>(input_resampler_.GetOutputSamples(data.size()));
+                input_resampler_.Process(data.data(), data.size(), resampled.data());
+                data = std::move(resampled);
+            } else {
+                // 单麦克风
+                auto resampled = std::vector<int16_t>(input_resampler_.GetOutputSamples(data.size()));
+                input_resampler_.Process(data.data(), data.size(), resampled.data());
+                data = std::move(resampled);
+            }
         }
     } else {
-        data.resize(samples * codec_->input_channels());
+        // 采样率相同，无需重采样
+        data.resize(samples * channels);
         if (!codec_->InputData(data)) {
             return false;
         }
+
+        // 如果输入为 4 通道 MRMN，提取为 MMR，丢弃噪声通道
+        if (has_ref && channels == 4) {
+            const int total_frames = data.size() / 4;
+            std::vector<int16_t> mmr_data(total_frames * 3);
+            for (int i = 0; i < total_frames; ++i) {
+                mmr_data[i*3]     = data[i*4];       // Mic1 (通道0)
+                mmr_data[i*3 + 1] = data[i*4 + 2];   // Mic2 (通道2)
+                mmr_data[i*3 + 2] = data[i*4 + 1];   // Ref1 (通道1)
+                // data[i*4 + 3] = Noise (通道3) - 直接丢弃
+            }
+            data = std::move(mmr_data);
+            channels = 3; // 更新本地通道数
+        }
+
+        // 若需要旁路参考通道，则清零对应通道
+        if (has_ref && bypass_aec_reference_.load()) {
+            if (channels == 2) {
+                for (size_t i = 1; i < data.size(); i += 2) data[i] = 0;
+            } else if (channels == 3) {
+                for (size_t i = 2; i < data.size(); i += 3) data[i] = 0;
+            }
+        }
     }
 
-    /* Update the last input time */
+    // 更新最后输入时间和统计
     last_input_time_ = std::chrono::steady_clock::now();
     debug_statistics_.input_count++;
 
 #if CONFIG_USE_AUDIO_DEBUGGER
-    // 音频调试：发送原始音频数据
     if (audio_debugger_ == nullptr) {
         audio_debugger_ = std::make_unique<AudioDebugger>();
     }
@@ -400,79 +489,6 @@ bool AudioService::ReadAudioData(std::vector<int16_t>& data, int sample_rate, in
     return true;
 }
 #endif
-
-// 解决音乐播放时，自动填充AEC的数据
-bool AudioService::ReadAudioData(std::vector<int16_t>& data, int sample_rate, int samples) {
-    if (!codec_->input_enabled()) {
-        esp_timer_stop(audio_power_timer_);
-        esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
-        codec_->EnableInput(true);
-    }
-
-    if (codec_->input_sample_rate() != sample_rate) {
-        int channels = 2;
-        data.resize(samples * codec_->input_sample_rate() / sample_rate * channels);
-        if (!codec_->InputData(data)) {
-            return false;
-        }
-        if (codec_->input_channels() == 2) {
-            auto mic_channel = std::vector<int16_t>(data.size() / channels);
-            auto reference_channel = std::vector<int16_t>(data.size() / channels);
-            for (size_t i = 0, j = 0; i < mic_channel.size(); ++i, j += channels) {
-                mic_channel[i] = data[j];
-                reference_channel[i] = data[j + 1];
-            }
-
-            // 🔥 关键修复：当音乐播放等场景需要旁路AEC时，将参考信号强制清零
-            // 避免AEC滤波器因音乐参考信号与麦克风信号不相关而发散崩溃
-            if (bypass_aec_reference_.load()) {
-                std::fill(reference_channel.begin(), reference_channel.end(), 0);
-            }
-
-            auto resampled_mic = std::vector<int16_t>(input_resampler_.GetOutputSamples(mic_channel.size()));
-            auto resampled_reference = std::vector<int16_t>(reference_resampler_.GetOutputSamples(reference_channel.size()));
-            input_resampler_.Process(mic_channel.data(), mic_channel.size(), resampled_mic.data());
-            reference_resampler_.Process(reference_channel.data(), reference_channel.size(), resampled_reference.data());
-            data.resize(resampled_mic.size() + resampled_reference.size());
-            for (size_t i = 0, j = 0; i < resampled_mic.size(); ++i, j += 2) {
-                data[j] = resampled_mic[i];
-                data[j + 1] = resampled_reference[i];
-            }
-        } else {
-            auto resampled = std::vector<int16_t>(input_resampler_.GetOutputSamples(data.size()));
-            input_resampler_.Process(data.data(), data.size(), resampled.data());
-            data = std::move(resampled);
-        }
-    } else {
-        data.resize(samples * codec_->input_channels());
-        if (!codec_->InputData(data)) {
-            return false;
-        }
-
-        // 🔥 当输入采样率与目标采样率一致，但 codec 提供双声道时，同样需要处理旁路逻辑
-        if (codec_->input_channels() == 2 && bypass_aec_reference_.load()) {
-            // 双声道数据布局：[L0, R0, L1, R1, ...]
-            // 将参考声道（R）清零
-            for (size_t i = 1; i < data.size(); i += 2) {
-                data[i] = 0;
-            }
-        }
-    }
-
-    /* Update the last input time */
-    last_input_time_ = std::chrono::steady_clock::now();
-    debug_statistics_.input_count++;
-
-#if CONFIG_USE_AUDIO_DEBUGGER
-    // 音频调试：发送原始音频数据
-    if (audio_debugger_ == nullptr) {
-        audio_debugger_ = std::make_unique<AudioDebugger>();
-    }
-    audio_debugger_->Feed(data);
-#endif
-
-    return true;
-}
 
 void AudioService::AudioInputTask() {
     while (true) {
@@ -756,11 +772,9 @@ void AudioService::EnableWakeWordDetection(bool enable) {
         }
         wake_word_->Start();
         xEventGroupSetBits(event_group_, AS_EVENT_WAKE_WORD_RUNNING);
-        vTaskDelay(pdMS_TO_TICKS(100));
     } else {
         wake_word_->Stop();
         xEventGroupClearBits(event_group_, AS_EVENT_WAKE_WORD_RUNNING);
-        vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
 
@@ -777,11 +791,9 @@ void AudioService::EnableVoiceProcessing(bool enable) {
         audio_input_need_warmup_ = true;
         audio_processor_->Start();
         xEventGroupSetBits(event_group_, AS_EVENT_AUDIO_PROCESSOR_RUNNING);
-        vTaskDelay(pdMS_TO_TICKS(100));
     } else {
         audio_processor_->Stop();
         xEventGroupClearBits(event_group_, AS_EVENT_AUDIO_PROCESSOR_RUNNING);
-        vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
 

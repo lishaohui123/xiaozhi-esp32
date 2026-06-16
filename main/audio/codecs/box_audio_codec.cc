@@ -11,11 +11,18 @@ BoxAudioCodec::BoxAudioCodec(void* i2c_master_handle, int input_sample_rate, int
     gpio_num_t mclk, gpio_num_t bclk, gpio_num_t ws, gpio_num_t dout, gpio_num_t din,
     gpio_num_t pa_pin, uint8_t es8311_addr, uint8_t es7210_addr, bool input_reference) {
     duplex_ = true; // 是否双工
+
+#if 1
     input_reference_ = input_reference; // 是否使用参考输入，实现回声消除
     input_channels_ = input_reference_ ? 2 : 1; // 输入通道数
+#endif
+#if 0
+    input_reference_ = input_reference; // 是否使用参考输入，实现回声消除
+    input_channels_ = 4;    // 输入通道数
+#endif
     input_sample_rate_ = input_sample_rate;
     output_sample_rate_ = output_sample_rate;
-    input_gain_ = 35;
+    input_gain_ = 40;
 
     CreateDuplexChannels(mclk, bclk, ws, dout, din);
 
@@ -185,6 +192,7 @@ void BoxAudioCodec::SetOutputVolume(int volume) {
     AudioCodec::SetOutputVolume(volume);
 }
 
+#if 1   // 原有的代码，支持2通道
 void BoxAudioCodec::EnableInput(bool enable) {
     std::lock_guard<std::mutex> lock(data_if_mutex_);
     if (enable == input_enabled_) {
@@ -200,7 +208,6 @@ void BoxAudioCodec::EnableInput(bool enable) {
         };
         if (input_reference_) {
             fs.channel_mask |= ESP_CODEC_DEV_MAKE_CHANNEL_MASK(1);
-            // fs.channel_mask |= ESP_CODEC_DEV_MAKE_CHANNEL_MASK(1) | ESP_CODEC_DEV_MAKE_CHANNEL_MASK(2) | ESP_CODEC_DEV_MAKE_CHANNEL_MASK(3);
         }
         ESP_ERROR_CHECK(esp_codec_dev_open(input_dev_, &fs));
         ESP_ERROR_CHECK(esp_codec_dev_set_in_channel_gain(input_dev_, ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0), input_gain_));
@@ -209,6 +216,45 @@ void BoxAudioCodec::EnableInput(bool enable) {
     }
     AudioCodec::EnableInput(enable);
 }
+#endif
+
+#if 0   // 支持4通道的方式
+void BoxAudioCodec::EnableInput(bool enable) {
+    std::lock_guard<std::mutex> lock(data_if_mutex_);
+    if (enable == input_enabled_) return;
+    if (enable) {
+        esp_codec_dev_sample_info_t fs = {};
+        fs.bits_per_sample = 16;
+        fs.sample_rate = (uint32_t)output_sample_rate_;
+        fs.mclk_multiple = 0;
+
+        if (input_reference_) {
+            // MRNM 模式
+            fs.channel = 4;
+            fs.channel_mask = ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0) |
+                              ESP_CODEC_DEV_MAKE_CHANNEL_MASK(1) |
+                              ESP_CODEC_DEV_MAKE_CHANNEL_MASK(2) |
+                              ESP_CODEC_DEV_MAKE_CHANNEL_MASK(3);
+        } else {
+            // 仅双麦克风，无参考（2 通道）
+            fs.channel = 2;
+            fs.channel_mask = ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0) |
+                              ESP_CODEC_DEV_MAKE_CHANNEL_MASK(1);
+        }
+        ESP_ERROR_CHECK(esp_codec_dev_open(input_dev_, &fs));
+        // 经验证没有生效
+        // ESP_ERROR_CHECK(esp_codec_dev_set_in_channel_gain(input_dev_, ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0) | ESP_CODEC_DEV_MAKE_CHANNEL_MASK(2), input_gain_));
+        esp_codec_dev_set_in_gain(input_dev_, input_gain_); // 这个函数是对4个通道生效
+        if (input_reference_) {
+            // 参考不设置增益
+            // ESP_ERROR_CHECK(esp_codec_dev_set_in_channel_gain(input_dev_, ESP_CODEC_DEV_MAKE_CHANNEL_MASK(1), input_gain_));
+        }
+    } else {
+        ESP_ERROR_CHECK(esp_codec_dev_close(input_dev_));
+    }
+    AudioCodec::EnableInput(enable);
+}
+#endif
 
 void BoxAudioCodec::EnableOutput(bool enable) {
     std::lock_guard<std::mutex> lock(data_if_mutex_);
@@ -232,32 +278,11 @@ void BoxAudioCodec::EnableOutput(bool enable) {
     AudioCodec::EnableOutput(enable);
 }
 
-#if 0
 int BoxAudioCodec::Read(int16_t* dest, int samples) {
     if (input_enabled_) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_read(input_dev_, (void*)dest, samples * sizeof(int16_t)));
     }
-    // Printsimplestrength(dest, samples, 4);
-    return samples;
-}
-#endif
-
-// 为了解决在最大音量播放音乐时，读取出现错误的问题
-int BoxAudioCodec::Read(int16_t* dest, int samples) {
-    if (input_enabled_) {
-        esp_err_t ret = esp_codec_dev_read(input_dev_, (void*)dest, samples * sizeof(int16_t));
-        if (ret != ESP_OK) {
-            // 发生错误时，填充静音数据并返回 samples，避免上层处理异常数据
-            memset(dest, 0, samples * sizeof(int16_t));
-            ESP_LOGW(TAG, "Read failed, filled silence: %d samples, err: %s", samples, esp_err_to_name(ret));
-
-            // 可选：尝试复位输入设备
-            // esp_codec_dev_close(input_dev_);
-            // vTaskDelay(pdMS_TO_TICKS(10));
-            // esp_codec_dev_open(input_dev_, ...);
-        }
-    }
-
+    // Printsimplestrength(dest, samples, input_channels_);
     return samples;
 }
 

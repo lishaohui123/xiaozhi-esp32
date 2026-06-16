@@ -273,6 +273,7 @@ esp_err_t VoiceCall::initMqtt(const std::string& device_id, const std::string& d
     mqtt_->Subscribe("device/" + m_device_info.device_id + "/works");
     mqtt_->Subscribe("device/" + m_device_info.device_id + "/audio");
     mqtt_->Subscribe("social/" + m_device_info.device_id + "/hd");
+    mqtt_->Subscribe("device/" + m_device_info.device_id + "/set");
     
     ESP_LOGI(TAG, "VoiceCall initialized successfully");
     return ESP_OK;
@@ -646,6 +647,13 @@ void VoiceCall::handle_mqtt_message(const char* topic, const char* payload, int 
         return;
     }
 
+    char device_set_topic[64];
+    snprintf(device_set_topic, sizeof(device_set_topic), TOPIC_DEVICE_SET_TEMPLATE, m_device_info.device_id.c_str());
+    if (strcmp(topic, device_set_topic) == 0) {
+        handle_device_set(payload);
+        return;
+    }
+
     ESP_LOGW(TAG, "Unhandled MQTT topic: %s", topic);
 }
 
@@ -860,6 +868,42 @@ void VoiceCall::handle_device_audio(const char* payload) {
 }
 
 /*********************************************
+* 处理小程序上对设备的操作，比如 音量、实时打断等操作
+*********************************************/
+void VoiceCall::handle_device_set(const char* payload) {
+    if (!payload) {
+        ESP_LOGE(TAG, "Invalid  device set payload");
+        return;
+    }
+
+    ESP_LOGI(TAG, "Handling device set: %s", payload);
+
+    cJSON* root = cJSON_Parse(payload);
+    if (!root) {
+        ESP_LOGE(TAG, "Failed to parse device set payload");
+        return;
+    }
+
+    std::string set_type = std::string(cJSON_GetObjectItem(root, "setType")->valuestring);
+
+    if (set_type == "volume") {
+        int volume = cJSON_GetObjectItem(root, "number")->valueint;
+
+        auto codec = Board::GetInstance().GetAudioCodec();
+        codec->SetOutputVolume(volume);
+    }
+
+    if (set_type == "modeRealtime") {
+        int mode_realtime = cJSON_GetObjectItem(root, "number")->valueint;
+        GloableVar::mode_realtime = mode_realtime;
+
+        Application::GetInstance().SetModeRealtime();
+    }
+
+    cJSON_Delete(root);
+}
+
+/*********************************************
 * 处理小龙的朋友之间的互动，戳一下、送爱心、留言等操作
 *********************************************/
 void VoiceCall::handle_social_hd(const char* payload) {
@@ -904,7 +948,7 @@ void VoiceCall::handle_social_hd(const char* payload) {
 
             vTaskDelay(pdMS_TO_TICKS(3000));
 
-            std::string recordId = std::string(cJSON_GetObjectItem(root, "id")->valuestring);
+            long recordId = (long)(cJSON_GetObjectItem(root, "id")->valueint);
             std::string audio_url = std::format("{}audio?recordId={}", OTA_URI, recordId);
 
             auto music = Board::GetInstance().GetMusic();

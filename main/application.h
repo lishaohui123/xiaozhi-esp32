@@ -120,6 +120,9 @@ public:
      * This includes closing audio channel, resetting protocol and ota objects
      */
     void ResetProtocol();
+
+    void SetModeRealtime();
+
 #if 1
     Protocol* GetProtocol() { return protocol_.get(); }
 
@@ -175,6 +178,12 @@ private:
     
     // State change handler called by state machine
     void OnStateChanged(DeviceState old_state, DeviceState new_state);
+
+    // 解决长语句被分成两句的问题
+    TimerHandle_t vad_silence_debounce_timer_ = nullptr;
+    static void VadSilenceDebounceCallback(TimerHandle_t xTimer);
+    void OnVadSilenceConfirmed();   // 真正的静音确认处理
+    void HandleVadStateChange(bool speaking);  // 替代直接的事件设置
 };
 
 

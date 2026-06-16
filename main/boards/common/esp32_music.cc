@@ -2181,6 +2181,7 @@ void Esp32Music::PlayAudioStreamImpl() {
  * 使用事件组的方式来进行音乐的播放。
  ************************************************************/
 // 加了taskYIELD
+#if 0   // 不能播放mp3的最后一个字
 void Esp32Music::PlayAudioStream() {
     ESP_LOGI(TAG, "========== 开始音频流播放 ==========");
   
@@ -2627,7 +2628,474 @@ void Esp32Music::PlayAudioStream() {
     
     ESP_LOGI(TAG, "🎵 音频流播放线程结束");
 }
+#endif
 
+void Esp32Music::PlayAudioStream() {
+    ESP_LOGI(TAG, "========== 开始音频流播放 ==========");
+  
+    // 初始化时间跟踪变量
+    current_play_time_ms_ = 0;
+    last_frame_time_ms_ = 0;
+    total_frames_decoded_ = 0;
+    
+    auto codec = Board::GetInstance().GetAudioCodec();
+    ESP_LOGI(TAG, "获取音频编解码器: %p", codec);
+
+    if (!mp3_decoder_initialized_) {
+        ESP_LOGE(TAG, "MP3解码器未初始化");
+        is_playing_ = false;
+        return;
+    }
+    
+    ESP_LOGI(TAG, "MP3解码器已初始化，等待缓冲区数据...");
+    
+    size_t total_played = 0;
+    int bytes_left = 0;
+    uint8_t* read_ptr = mp3_input_buffer_;  // 使用静态缓冲区
+    
+    // 标记是否已经处理过ID3标签
+    bool id3_processed = false;
+
+    // 支持音乐播放中，小智唤醒之后，停止音乐播放
+    is_state_completed_ = 0;
+    ESP_LOGI(TAG, "播放状态标志初始化完成");
+    
+    // 播放统计
+    size_t pool_packets = 0;
+    size_t dynamic_packets = 0;
+    size_t memory_pool_hits = 0;
+    size_t memory_pool_misses = 0;
+    auto start_time = std::chrono::steady_clock::now();
+    
+    // 播放关键统计
+    size_t total_buffer_fetches = 0;
+    size_t total_decode_attempts = 0;
+    size_t total_decode_success = 0;
+    size_t total_decode_failures = 0;
+    size_t total_pcm_bytes_sent = 0;
+    
+    ESP_LOGI(TAG, "开始主播放循环...");
+
+    while (is_playing_) {
+        auto bits = xEventGroupWaitBits(event_group_, PLAY_EVENT_SCHEDULE | WIFI_EVENT_SCHEDULE, pdTRUE, pdFALSE, pdMS_TO_TICKS(10));
+
+        if (bits == 0) {
+            // 超时：检查是否应该继续
+            std::lock_guard<std::mutex> lock(buffer_mutex_);
+            if (audio_buffer_.empty() && !is_downloading_) {
+                break; // 无数据且下载结束，退出播放
+            }
+        }
+        
+        if (bits & WIFI_EVENT_SCHEDULE) {
+            break;      // 网络异常
+        }
+        
+        if (bits & PLAY_EVENT_SCHEDULE) {
+            total_decode_attempts++;
+
+            // 检查设备状态
+            auto& app = Application::GetInstance();
+            DeviceState current_state = app.GetDeviceState();
+
+            // 等小智把话说完了，变成聆听状态之后，马上转成待机状态，进入音乐播放
+            if (current_state != kDeviceStateIdle) {
+                ESP_LOGI(TAG, "⚠️ 检测到小智被唤醒 (状态: %d)，停止音乐播放", current_state);
+        
+                // 在播放状态下，小智被唤醒，停止下载和播放
+                is_playing_ = false;
+                is_downloading_ = false;
+                is_state_completed_ = 2;
+                
+                // 打印中断时的统计
+                auto interrupt_time = std::chrono::steady_clock::now();
+                auto elapsed_interrupt = std::chrono::duration_cast<std::chrono::milliseconds>(interrupt_time - start_time).count();
+                ESP_LOGI(TAG, "播放被中断 - 总播放: %d 字节，耗时: %ld ms", total_played, elapsed_interrupt);
+                break;
+            }
+
+            // 在正常的播放状态下
+            if (current_state == kDeviceStateIdle) {
+                is_state_completed_ = 1;
+                codec->EnableOutput(true);
+                Application::GetInstance().GetAudioService().is_voice_out_ = true;
+            }
+
+            // 如果需要更多MP3数据，从缓冲区读取
+            if (bytes_left < 4096) {
+                total_buffer_fetches++;
+                
+                AudioChunk chunk;
+                
+                // 从缓冲区获取音频数据
+                {
+                    std::unique_lock<std::mutex> lock(buffer_mutex_);
+                    
+                    if (total_buffer_fetches % 50 == 0) {
+                        ESP_LOGI(TAG, "缓冲区状态 - 大小: %d 字节，队列长度: %d，下载状态: %d", 
+                                buffer_size_.load(std::memory_order_relaxed), audio_buffer_.size(), is_downloading_);
+                    }
+                    
+                    if (audio_buffer_.empty()) {
+                        if (!is_downloading_) {
+                            ESP_LOGI(TAG, "🎵 播放完成 - 总共播放: %d 字节", total_played);
+                            break;
+                        }
+                        
+                        if (total_buffer_fetches % 20 == 0) {
+                            ESP_LOGI(TAG, "🕐 等待新数据 (缓冲区空，下载进行中)...");
+                        }
+                        
+                        if (!buffer_cv_.wait_for(lock, std::chrono::milliseconds(10), 
+                            [this] { return !audio_buffer_.empty() || !is_downloading_; })) {
+                            if (total_buffer_fetches % 100 == 0) {
+                                ESP_LOGD(TAG, "缓冲区等待超时，继续尝试...");
+                            }
+                            continue;
+                        }
+                        if (audio_buffer_.empty()) {
+                            continue;
+                        }
+                    }
+                    
+                    chunk = audio_buffer_.front();
+                    audio_buffer_.pop();
+
+                    buffer_size_.fetch_sub(chunk.size, std::memory_order_relaxed);
+                    
+                    buffer_cv_.notify_one();
+                    
+                    ESP_LOGD(TAG, "从缓冲区获取数据块 - 大小: %d 字节，剩余缓冲区: %d 字节", 
+                            chunk.size, buffer_size_.load(std::memory_order_relaxed));
+                }
+                
+                // 将新数据添加到MP3输入缓冲区
+                if (chunk.data && chunk.size > 0) {
+                    if (bytes_left > 0 && read_ptr != mp3_input_buffer_) {
+                        ESP_LOGD(TAG, "移动剩余 %d 字节到缓冲区开头", bytes_left);
+                        memmove(mp3_input_buffer_, read_ptr, bytes_left);
+                    }
+                    
+                    size_t space_available = MP3_INPUT_BUFFER_SIZE - bytes_left;
+                    size_t copy_size = std::min(chunk.size, space_available);
+                    
+                    if (copy_size > 0) {
+                        ESP_LOGD(TAG, "复制 %d 字节到MP3缓冲区 (可用空间: %d，剩余: %d)", 
+                                copy_size, space_available, bytes_left);
+                        
+                        memcpy(mp3_input_buffer_ + bytes_left, chunk.data, copy_size);
+                        bytes_left += copy_size;
+                        read_ptr = mp3_input_buffer_;
+                        
+                        if (total_buffer_fetches % 100 == 0) {
+                            ESP_LOGI(TAG, "MP3缓冲区状态 - 总大小: %d 字节，指针位置: %p", 
+                                    bytes_left, static_cast<void*>(read_ptr));
+                        }
+                    } else {
+                        ESP_LOGW(TAG, "缓冲区空间不足! 可用: %d，需要: %d", space_available, chunk.size);
+                    }
+                    
+                    // 检查并跳过ID3标签
+                    if (!id3_processed && bytes_left >= 10) {
+                        size_t id3_skip = SkipId3Tag(read_ptr, bytes_left);
+                        if (id3_skip > 0) {
+                            ESP_LOGI(TAG, "跳过ID3标签: %u 字节", (unsigned int)id3_skip);
+                            read_ptr += id3_skip;
+                            bytes_left -= id3_skip;
+                        }
+                        id3_processed = true;
+                    }
+                    
+                    // 释放chunk内存
+                    FreeAudioChunk(chunk.data);
+                }
+            }
+
+            // 尝试找到MP3帧同步
+            int sync_offset = MP3FindSyncWord(read_ptr, bytes_left);
+            if (sync_offset < 0) {
+                memory_pool_misses++;
+                
+                if (bytes_left > 1) {
+                    if (memory_pool_misses % 100 == 0) {
+                        ESP_LOGW(TAG, "未找到MP3同步字，跳过1字节 (失败次数: %d，剩余数据: %d 字节)", 
+                                memory_pool_misses, bytes_left);
+                    }
+                    
+                    read_ptr++;
+                    bytes_left--;
+                } else {
+                    if (bytes_left == 0 && total_buffer_fetches % 50 == 0) {
+                        ESP_LOGI(TAG, "MP3缓冲区已空，等待更多数据...");
+                    }
+                    bytes_left = 0;
+                }
+                continue;
+            }
+
+            // 跳过到同步位置
+            if (sync_offset > 0) {
+                ESP_LOGD(TAG, "找到同步字偏移: %d 字节", sync_offset);
+                read_ptr += sync_offset;
+                bytes_left -= sync_offset;
+            }
+            
+            ESP_LOGD(TAG, "开始解码MP3帧 - 数据大小: %d 字节", bytes_left);
+            
+            // 解码MP3帧
+            int decode_result = MP3Decode(mp3_decoder_, &read_ptr, &bytes_left, pcm_buffer_, 0);
+
+            if (decode_result == 0) {
+                total_decode_success++;
+                MP3GetLastFrameInfo(mp3_decoder_, &mp3_frame_info_);
+                total_frames_decoded_++;
+                
+                if (total_decode_success % 100 == 0) {
+                    ESP_LOGI(TAG, "✅ 成功解码 %d 帧，采样率: %d，通道数: %d，采样数: %d", 
+                            total_decode_success, mp3_frame_info_.samprate, 
+                            mp3_frame_info_.nChans, mp3_frame_info_.outputSamps);
+                } else {
+                    ESP_LOGD(TAG, "解码成功 - 帧 %d", total_decode_success);
+                }
+                
+                if (mp3_frame_info_.samprate == 0 || mp3_frame_info_.nChans == 0) {
+                    ESP_LOGW(TAG, "⚠️ 无效的帧信息 - 采样率: %d，通道数: %d，跳过此帧", 
+                            mp3_frame_info_.samprate, mp3_frame_info_.nChans);
+                    memory_pool_misses++;
+                    continue;
+                }
+                
+                int frame_duration_ms = (mp3_frame_info_.outputSamps * 1000) / 
+                                       (mp3_frame_info_.samprate * mp3_frame_info_.nChans);
+                
+                current_play_time_ms_ += frame_duration_ms;
+                
+                if (current_play_time_ms_ % 5000 == 0) {
+                    ESP_LOGI(TAG, "⏱️ 播放时间: %lld 秒", current_play_time_ms_ / 1000);
+                }
+                
+                int buffer_latency_ms = 600;
+                UpdateLyricDisplay(current_play_time_ms_ + buffer_latency_ms);
+                
+                if (mp3_frame_info_.outputSamps > 0) {
+                    int16_t* final_pcm_data = pcm_buffer_;
+                    int final_sample_count = mp3_frame_info_.outputSamps;
+                    
+                    if (mp3_frame_info_.nChans == 2) {
+                        int stereo_samples = mp3_frame_info_.outputSamps;
+                        int mono_samples = stereo_samples / 2;
+                        
+                        ESP_LOGD(TAG, "立体声转单声道 - 输入: %d 样本，输出: %d 样本", 
+                                stereo_samples, mono_samples);
+                        
+                        for (int i = 0; i < mono_samples; ++i) {
+                            int left = pcm_buffer_[i * 2];
+                            int right = pcm_buffer_[i * 2 + 1];
+                            mono_buffer_[i] = (int16_t)((left + right) / 2);
+                        }
+                        
+                        final_pcm_data = mono_buffer_;
+                        final_sample_count = mono_samples;
+                        memory_pool_hits++;
+                    } else if (mp3_frame_info_.nChans == 1) {
+                        ESP_LOGD(TAG, "已经是单声道音频 - %d 样本", final_sample_count);
+                        memory_pool_hits++;
+                    }
+                    
+                    AudioStreamPacket* packet = AllocateAudioPacket();
+                    if (!packet) {
+                        ESP_LOGE(TAG, "❌ 音频包分配失败");
+                        total_decode_failures++;
+                        continue;
+                    }
+                    
+                    if (memory_pool_initialized_) {
+                        pool_packets++;
+                    } else {
+                        dynamic_packets++;
+                    }
+                    
+                    packet->sample_rate = mp3_frame_info_.samprate;
+                    packet->frame_duration = 60;
+                    packet->timestamp = 0;
+                    
+                    size_t pcm_size_bytes = final_sample_count * sizeof(int16_t);
+                    total_pcm_bytes_sent += pcm_size_bytes;
+                    
+                    if (total_decode_success % 50 == 0) {
+                        ESP_LOGI(TAG, "📦 PCM数据包 - 采样率: %d，样本数: %d，大小: %d 字节", 
+                                packet->sample_rate, final_sample_count, pcm_size_bytes);
+                    }
+                    
+                    if (packet->payload.capacity() < pcm_size_bytes) {
+                        packet->payload.reserve(pcm_size_bytes * 2);
+                    }
+                    packet->payload.resize(pcm_size_bytes);
+                    memcpy(packet->payload.data(), final_pcm_data, pcm_size_bytes);
+
+                    Application::GetInstance().AddAudioData(std::move(*packet));
+                    total_played += pcm_size_bytes;
+                    
+                    ESP_LOGD(TAG, "发送PCM数据到Application - 总播放: %d 字节", total_played);
+                    
+                    FreeAudioPacket(packet);
+                    
+                    if (total_played % (256 * 1024) == 0) {
+                        auto now = std::chrono::steady_clock::now();
+                        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time).count();
+                        float play_speed = (total_played * 1000.0f) / (elapsed * 1024.0f);
+                        
+                        ESP_LOGI(TAG, "📊 播放进度 - 已播放: %d 字节 (%.1f KB/s)", total_played, play_speed);
+                        ESP_LOGI(TAG, "📊 缓冲区状态 - 大小: %d 字节，内存池包: %d，动态包: %d", 
+                                buffer_size_.load(std::memory_order_relaxed), pool_packets, dynamic_packets);
+                        
+                        ESP_LOGI(TAG, "📊 解码统计 - 成功: %d，失败: %d，尝试: %d", 
+                                total_decode_success, total_decode_failures, total_decode_attempts);
+                        ESP_LOGI(TAG, "📊 内存池统计 - 命中: %d，未命中: %d", 
+                                memory_pool_hits, memory_pool_misses);
+                    }
+                } else {
+                    ESP_LOGW(TAG, "⚠️ 解码成功但输出样本数为0");
+                }
+                
+                if (buffer_size_.load(std::memory_order_relaxed) > 2048) {
+                    taskYIELD();
+                }
+                
+            } else {
+                total_decode_failures++;
+                memory_pool_misses++;
+                
+                ESP_LOGW(TAG, "❌ MP3解码失败，错误码: %d，剩余数据: %d 字节", decode_result, bytes_left);
+                
+                if (total_decode_attempts > 0 && total_decode_attempts % 100 == 0) {
+                    float failure_rate = (total_decode_failures * 100.0f) / total_decode_attempts;
+                    ESP_LOGW(TAG, "解码失败率: %.1f%% (%d/%d)", 
+                            failure_rate, total_decode_failures, total_decode_attempts);
+                }
+                
+                if (bytes_left > 1) {
+                    int skip_bytes = std::min(10, bytes_left / 2);
+                    ESP_LOGW(TAG, "跳过 %d 字节继续尝试解码", skip_bytes);
+                    read_ptr += skip_bytes;
+                    bytes_left -= skip_bytes;
+                } else {
+                    bytes_left = 0;
+                }
+            }
+        }
+
+        if (bytes_left > 0) {
+            signalDownload();
+        }
+    }
+
+    // ================== 关键修改：刷新残留数据 ==================
+    ESP_LOGI(TAG, "主循环结束，剩余未解码数据: %d 字节", bytes_left);
+    if (bytes_left > 0 && is_playing_ && !(Application::GetInstance().GetDeviceState() != kDeviceStateIdle)) {
+        ESP_LOGI(TAG, "开始刷新残留MP3数据（防止末尾丢失）");
+        int flush_attempts = 0;
+        while (bytes_left > 0 && flush_attempts < 100) {
+            int sync = MP3FindSyncWord(read_ptr, bytes_left);
+            if (sync < 0) {
+                read_ptr++;
+                bytes_left--;
+                flush_attempts++;
+                continue;
+            }
+            read_ptr += sync;
+            bytes_left -= sync;
+            
+            int decode_result = MP3Decode(mp3_decoder_, &read_ptr, &bytes_left, pcm_buffer_, 0);
+            if (decode_result == 0) {
+                MP3GetLastFrameInfo(mp3_decoder_, &mp3_frame_info_);
+                if (mp3_frame_info_.outputSamps > 0 && mp3_frame_info_.samprate > 0 && mp3_frame_info_.nChans > 0) {
+                    // 复用前面的 PCM 处理逻辑（此处简化为直接发送，实际可抽取函数）
+                    int16_t* final_pcm_data = pcm_buffer_;
+                    int final_sample_count = mp3_frame_info_.outputSamps;
+                    if (mp3_frame_info_.nChans == 2) {
+                        int mono_samples = final_sample_count / 2;
+                        for (int i = 0; i < mono_samples; ++i) {
+                            mono_buffer_[i] = (int16_t)((pcm_buffer_[i*2] + pcm_buffer_[i*2+1]) / 2);
+                        }
+                        final_pcm_data = mono_buffer_;
+                        final_sample_count = mono_samples;
+                    }
+                    AudioStreamPacket* pkt = AllocateAudioPacket();
+                    if (pkt) {
+                        pkt->sample_rate = mp3_frame_info_.samprate;
+                        pkt->frame_duration = 60;
+                        size_t pcm_bytes = final_sample_count * sizeof(int16_t);
+                        pkt->payload.resize(pcm_bytes);
+                        memcpy(pkt->payload.data(), final_pcm_data, pcm_bytes);
+                        Application::GetInstance().AddAudioData(std::move(*pkt));
+                        FreeAudioPacket(pkt);
+                        total_played += pcm_bytes;
+                        total_decode_success++;
+                        ESP_LOGI(TAG, "刷新解码成功，增加 %d 字节", pcm_bytes);
+                    }
+                }
+            } else {
+                if (bytes_left > 0) {
+                    read_ptr++;
+                    bytes_left--;
+                }
+            }
+            flush_attempts++;
+        }
+        ESP_LOGI(TAG, "刷新完成，剩余 %d 字节，处理 %d 次", bytes_left, flush_attempts);
+    }
+
+    // ================== 等待音频队列清空 ==================
+    auto& app = Application::GetInstance();
+    int wait_ms = 0;
+    // 注意：GetAudioQueueSize() 可能需要 Application 提供，若无则简单延时
+    while (wait_ms < 300) {
+        // 如果 Application 提供获取队列长度的方法，可以判断；否则延时后直接退出
+        vTaskDelay(pdMS_TO_TICKS(10));
+        wait_ms += 10;
+    }
+    ESP_LOGI(TAG, "已等待音频队列 %d ms", wait_ms);
+
+    // 播放结束时统计
+    auto end_time = std::chrono::steady_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+    
+    float play_speed_kBps = 0;
+    if (elapsed > 0) {
+        play_speed_kBps = (total_played * 1000.0f) / (elapsed * 1024.0f);
+    }
+
+    ESP_LOGI(TAG, "========== 音频流播放完成统计 ==========");
+    ESP_LOGI(TAG, "1. 总播放字节数: %d 字节 (%.2f MB)", total_played, total_played / (1024.0f * 1024.0f));
+    ESP_LOGI(TAG, "2. 播放耗时: %ld 毫秒 (%.1f 秒)", elapsed, elapsed / 1000.0f);
+    ESP_LOGI(TAG, "3. 平均播放速度: %.1f KB/s", play_speed_kBps);
+    ESP_LOGI(TAG, "4. 解码统计:");
+    ESP_LOGI(TAG, "   - 总尝试解码: %d 次", total_decode_attempts);
+    ESP_LOGI(TAG, "   - 成功解码: %d 次", total_decode_success);
+    ESP_LOGI(TAG, "   - 解码失败: %d 次", total_decode_failures);
+    ESP_LOGI(TAG, "   - 成功率: %.1f%%", 
+            total_decode_attempts ? (total_decode_success * 100.0f) / total_decode_attempts : 0.0f);
+    ESP_LOGI(TAG, "5. 缓冲区统计:");
+    ESP_LOGI(TAG, "   - 缓冲区获取次数: %d 次", total_buffer_fetches);
+    ESP_LOGI(TAG, "   - PCM字节发送: %d 字节", total_pcm_bytes_sent);
+    ESP_LOGI(TAG, "6. 内存池统计:");
+    ESP_LOGI(TAG, "   - 内存池包: %d", pool_packets);
+    ESP_LOGI(TAG, "   - 动态分配包: %d", dynamic_packets);
+    ESP_LOGI(TAG, "   - 内存池命中: %d", memory_pool_hits);
+    ESP_LOGI(TAG, "   - 内存池未命中: %d", memory_pool_misses);
+    ESP_LOGI(TAG, "7. 帧解码统计:");
+    ESP_LOGI(TAG, "   - 总解码帧数: %d", total_frames_decoded_);
+    ESP_LOGI(TAG, "   - 总播放时间: %lld 毫秒", current_play_time_ms_);
+    ESP_LOGI(TAG, "8. 最终缓冲区大小: %d 字节", buffer_size_.load(std::memory_order_relaxed));
+    ESP_LOGI(TAG, "9. 播放状态: %d", is_state_completed_.load());
+    ESP_LOGI(TAG, "=========================================");
+    
+    Application::GetInstance().GetAudioService().is_voice_out_ = false;
+    is_playing_ = false;
+    
+    ESP_LOGI(TAG, "🎵 音频流播放线程结束");
+}
 
 // 修改错误恢复函数
 bool Esp32Music::RecoverFromDecodeError(uint8_t*& data, int& data_size) {
