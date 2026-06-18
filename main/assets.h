@@ -4,6 +4,7 @@
 #include <map>
 #include <string>
 #include <functional>
+#include <memory>
 
 #include <cJSON.h>
 #include <esp_partition.h>
@@ -15,8 +16,10 @@ struct Asset {
     size_t offset;
 };
 
+class HttpClient;
 class Assets {
 public:
+    std::shared_ptr<HttpClient> http_client_ = nullptr;
     static Assets& GetInstance() {
         static Assets instance;
         return instance;

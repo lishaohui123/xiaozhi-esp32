@@ -21,5 +21,6 @@
 #define ACCESS_TOKEN "sk-293ca4e64d3f4aa39010864ce95dfdbe"
 
 extern std::string blue_device;
+extern std::string board_id;
 
 #endif // _CONSTANTS_H

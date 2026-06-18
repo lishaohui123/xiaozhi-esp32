@@ -49,16 +49,18 @@ std::string McpService::SendRequest(const std::string& path,
                                        const std::string& method, 
                                        const std::string& body) {    
     int connection_id = esp_random() % 10000;
-    auto http = Board::GetInstance().GetNetwork()->CreateHttp(connection_id);
-    if (!http) {
+    auto http_unique = Board::GetInstance().GetNetwork()->CreateHttp(connection_id);
+    std::shared_ptr<Http> shared_http = std::move(http_unique);
+    http_client_ = std::static_pointer_cast<HttpClient>(shared_http);
+    if (!http_client_) {
         ESP_LOGE(TAG, "Failed to create HTTP client");
         return "{\"error\": \"Failed to create HTTP client\"}";
     }
     
     // 设置请求头
-    http->SetHeader("Content-Type", "application/json");
-    http->SetHeader("Device-ID", GloableVar::device_id);
-    http->SetHeader("token", ACCESS_TOKEN);
+    http_client_->SetHeader("Content-Type", "application/json");
+    http_client_->SetHeader("Device-ID", GloableVar::device_id);
+    http_client_->SetHeader("token", ACCESS_TOKEN);
         
     // 构建完整URL
     std::string url = OTA_URI + path;
@@ -68,20 +70,20 @@ std::string McpService::SendRequest(const std::string& path,
     std::string body_str = body;
     if (!body.empty()) {
         ESP_LOGD(TAG, "Request body: %s", body.c_str());
-        http->SetContent(std::move(body_str));
+        http_client_->SetContent(std::move(body_str));
     }
         
     // 发送请求
-    if (!http->Open(method.c_str(), url.c_str())) {
+    if (!http_client_->Open(method.c_str(), url.c_str())) {
         ESP_LOGE(TAG, "Failed to open connection to %s", url.c_str());
         return "{\"error\": \"Failed to open connection\"}";
     }
         
     // 读取响应
-    std::string response = http->ReadAll();
-    int status_code = http->GetStatusCode();
+    std::string response = http_client_->ReadAll();
+    int status_code = http_client_->GetStatusCode();
         
-    http->Close();
+    http_client_->Close();
         
     ESP_LOGI(TAG, "Response status code: %d", status_code);
     ESP_LOGD(TAG, "Response body: %s", response.c_str());

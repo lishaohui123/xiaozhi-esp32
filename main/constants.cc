@@ -5,4 +5,5 @@
 #include <sstream>
 #include <iomanip>
 
-std::string blue_device;
+std::string blue_device = "";
+std::string board_id = "";

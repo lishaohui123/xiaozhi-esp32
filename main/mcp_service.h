@@ -5,9 +5,12 @@
 #include <iomanip>
 #include <cctype>
 #include <string>
+#include <memory>
 
+class HttpClient;
 class McpService {
 public:
+  std::shared_ptr<HttpClient> http_client_ = nullptr;
   static McpService &GetInstance();
   
   void healthReportIssue(const std::string& issue);

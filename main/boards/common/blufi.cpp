@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cstring>
 #include <string>
+#include "constants.h"
 
 #include "application.h"
 #include "esp_bt.h"
@@ -19,6 +20,7 @@
 #include "esp_bt_device.h"
 #include "esp_bt_main.h"
 #include "esp_gap_ble_api.h"
+#include "constants.h"
 #endif
 
 // NimBLE specific
@@ -171,6 +173,13 @@ esp_err_t Blufi::_host_init() {
         return ESP_FAIL;
     }
     ESP_LOGI(BLUFI_TAG, "BD ADDR: " ESP_BD_ADDR_STR, ESP_BD_ADDR_HEX(esp_bt_dev_get_address()));
+
+    const uint8_t* bt_addr = esp_bt_dev_get_address();
+    char addr_str[18];
+    snprintf(addr_str, sizeof(addr_str), "%02x:%02x:%02x:%02x:%02x:%02x",
+             bt_addr[0], bt_addr[1], bt_addr[2], bt_addr[3], bt_addr[4], bt_addr[5]);
+    blue_device = addr_str;
+    ESP_LOGI(BLUFI_TAG, "Saved Bluetooth MAC to blue_device: %s", blue_device.c_str());
     return ESP_OK;
 }
 

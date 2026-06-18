@@ -92,26 +92,30 @@ esp_err_t Ota::CheckVersion() {
         return ESP_ERR_INVALID_ARG;
     }
 
-    auto http = SetupHttp();
+    auto http = std::unique_ptr<Http>(SetupHttp());
+
+    std::shared_ptr<Http> shared_http = std::move(http);
+    http_client_ = std::static_pointer_cast<HttpClient>(shared_http);
+    http_client_->SetKeepAlive(true); // 启用 Keep-Alive
 
     std::string data = board.GetSystemInfoJson();
     std::string method = data.length() > 0 ? "POST" : "GET";
-    http->SetContent(std::move(data));
+    http_client_->SetContent(std::move(data));
 
-    if (!http->Open(method, url)) {
+    if (!http_client_->Open(method, url)) {
         int last_error = http->GetLastError();
         ESP_LOGE(TAG, "Failed to open HTTP connection, code=0x%x", last_error);
         return last_error;
     }
 
-    auto status_code = http->GetStatusCode();
+    auto status_code = http_client_->GetStatusCode();
     if (status_code != 200) {
         ESP_LOGE(TAG, "Failed to check version, status code: %d", status_code);
         return status_code;
     }
 
-    data = http->ReadAll();
-    http->Close();
+    data = http_client_->ReadAll();
+    http_client_->Close();
 
     // Response: { "firmware": { "version": "1.0.0", "url": "http://" } }
     // Parse the JSON response and check if the version is newer
@@ -282,7 +286,7 @@ bool Ota::Upgrade(const std::string& firmware_url, std::function<void(int progre
     std::string image_header;
 
     auto network = Board::GetInstance().GetNetwork();
-    auto http = network->CreateHttp(0);
+    std::shared_ptr<Http> http(network->CreateHttp(0).release());
     if (!http->Open("GET", firmware_url)) {
         ESP_LOGE(TAG, "Failed to open HTTP connection");
         return false;
@@ -456,22 +460,26 @@ esp_err_t Ota::Activate() {
         url += "activate";
     }
 
-    auto http = SetupHttp();
+    auto http = std::unique_ptr<Http>(SetupHttp());
+
+    std::shared_ptr<Http> shared_http = std::move(http);
+    http_client_ = std::static_pointer_cast<HttpClient>(shared_http);
+    http_client_->SetKeepAlive(true); // 启用 Keep-Alive
 
     std::string data = GetActivationPayload();
-    http->SetContent(std::move(data));
+    http_client_->SetContent(std::move(data));
 
-    if (!http->Open("POST", url)) {
+    if (!http_client_->Open("POST", url)) {
         ESP_LOGE(TAG, "Failed to open HTTP connection");
         return ESP_FAIL;
     }
     
-    auto status_code = http->GetStatusCode();
+    auto status_code = http_client_->GetStatusCode();
     if (status_code == 202) {
         return ESP_ERR_TIMEOUT;
     }
     if (status_code != 200) {
-        ESP_LOGE(TAG, "Failed to activate, code: %d, body: %s", status_code, http->ReadAll().c_str());
+        ESP_LOGE(TAG, "Failed to activate, code: %d, body: %s", status_code, http_client_->ReadAll().c_str());
         return ESP_FAIL;
     }
 
@@ -479,57 +487,32 @@ esp_err_t Ota::Activate() {
     return ESP_OK;
 }
 
-esp_err_t Ota::SendActivationCode(const std::string& deviceId, const std::string& activationCode) {
+esp_err_t Ota::SendActivationCode(const std::string& deviceId, const std::string& blue_device, const std::string& board_id) {
     // std::string url = GetCheckVersionUrl();
     std::string url = OTA_URI;
     if (url.back() != '/') {
-        url += "/device/deviceCode?deviceId=" + deviceId + "&deviceCode=" + activationCode;
+        url += "/device/bind?deviceId=" + deviceId + "&blueYaId=" + blue_device + "&boardId=" + board_id;
     } else {
-        url += "device/deviceCode?deviceId=" + deviceId + "&deviceCode=" + activationCode;
+        url += "device/bind?deviceId=" + deviceId + "&blueYaId=" + blue_device + "&boardId=" + board_id;
     }
 
-    auto http = SetupHttp();
+    auto http = std::unique_ptr<Http>(SetupHttp());
 
-    if (!http->Open("GET", url)) {
+    std::shared_ptr<Http> shared_http = std::move(http);
+    http_client_ = std::static_pointer_cast<HttpClient>(shared_http);
+    http_client_->SetKeepAlive(true); // 启用 Keep-Alive
+
+    if (!http_client_->Open("GET", url)) {
         ESP_LOGE(TAG, "Failed to open HTTP connection");
         return ESP_FAIL;
     }
     
-    auto status_code = http->GetStatusCode();
+    auto status_code = http_client_->GetStatusCode();
     if (status_code == 202) {
         return ESP_ERR_TIMEOUT;
     }
     if (status_code != 200) {
-        ESP_LOGE(TAG, "Failed to send activate code, code: %d, body: %s", status_code, http->ReadAll().c_str());
-        return ESP_FAIL;
-    }
-
-    ESP_LOGI(TAG, "Send activation code successful");
-    return ESP_OK;
-}
-
-esp_err_t Ota::SendActivationCode(const std::string& deviceId) {
-    // std::string url = GetCheckVersionUrl();
-    std::string url = OTA_URI;
-    if (url.back() != '/') {
-        url += "/device/bind?deviceId=" + deviceId;
-    } else {
-        url += "device/bind?deviceId=" + deviceId;
-    }
-
-    auto http = SetupHttp();
-
-    if (!http->Open("GET", url)) {
-        ESP_LOGE(TAG, "Failed to open HTTP connection");
-        return ESP_FAIL;
-    }
-    
-    auto status_code = http->GetStatusCode();
-    if (status_code == 202) {
-        return ESP_ERR_TIMEOUT;
-    }
-    if (status_code != 200) {
-        ESP_LOGE(TAG, "Failed to send activate code, code: %d, body: %s", status_code, http->ReadAll().c_str());
+        ESP_LOGE(TAG, "Failed to send activate code, code: %d, body: %s", status_code, http_client_->ReadAll().c_str());
         return ESP_FAIL;
     }
 

@@ -60,10 +60,6 @@ Application::~Application() {
         esp_timer_delete(clock_timer_handle_);
     }
     vEventGroupDelete(event_group_);
-
-    if (vad_silence_debounce_timer_ != nullptr) {
-        xTimerDelete(vad_silence_debounce_timer_, 0);
-    }
 }
 
 bool Application::SetDeviceState(DeviceState state) {
@@ -97,15 +93,8 @@ void Application::Initialize() {
         xEventGroupSetBits(event_group_, MAIN_EVENT_WAKE_WORD_DETECTED);
     };
 
-#if 0
     callbacks.on_vad_change = [this](bool speaking) {
         xEventGroupSetBits(event_group_, MAIN_EVENT_VAD_CHANGE);
-    };
-    audio_service_.SetCallbacks(callbacks);
-#endif
-
-    callbacks.on_vad_change = [this](bool speaking) {
-        HandleVadStateChange(speaking);   // 改为防抖处理
     };
     audio_service_.SetCallbacks(callbacks);
 
@@ -121,18 +110,6 @@ void Application::Initialize() {
     auto& mcp_server = McpServer::GetInstance();
     mcp_server.AddCommonTools();
     mcp_server.AddUserOnlyTools();
-
-
-    // 创建 VAD 静音防抖定时器（单次，延迟 300ms，可根据实际调整）
-    vad_silence_debounce_timer_ = xTimerCreate(
-        "vad_silence_timer",
-        pdMS_TO_TICKS(500),     // 300ms 防抖，可调至 200~500ms
-        pdFALSE,                // 单次触发
-        this,
-        VadSilenceDebounceCallback
-    );
-    assert(vad_silence_debounce_timer_ != nullptr);
-
 
     // Set network event callback for UI updates and network state handling
     board.SetNetworkEventCallback([this](NetworkEvent event, const std::string& data) {
@@ -375,6 +352,8 @@ void Application::ActivationTask() {
     // Create OTA object for activation process
     ota_ = std::make_unique<Ota>();
 
+    InitializeGloableVar();
+
     // Check for new assets version
     CheckAssetsVersion();
 
@@ -384,7 +363,7 @@ void Application::ActivationTask() {
     // Initialize the protocol
     InitializeProtocol();
 
-    InitializeMySystem();
+    InitializeMqtt();
 
     // Signal completion to main loop
     xEventGroupSetBits(event_group_, MAIN_EVENT_ACTIVATION_DONE);
@@ -502,10 +481,17 @@ void Application::CheckNewVersion() {
         // display->SetStatus(Lang::Strings::ACTIVATION);
         // Activation code is shown to the user and waiting for the user to input
         if (ota_->HasActivationCode()) {
-            // 发送设备码，自动进行设备和角色的绑定
-            // ota_->SendActivationCode(SystemInfo::GetMacAddress(), ota_->GetActivationCode());
-            ota_->SendActivationCode(SystemInfo::GetMacAddress());
+            // 自动进行设备绑定
+            ota_->SendActivationCode(SystemInfo::GetMacAddress(), blue_device, board_id);
             // ShowActivationCode(ota_->GetActivationCode(), ota_->GetActivationMessage());
+
+            if (blue_device == "")  {
+                std::string s = "小主人，请先双击开关键，进行蓝牙配网";
+                auto& alarm_manager = AlarmManager::GetInstance();
+                alarm_manager.PlayTtsAudioStreamVoice(s, 3);
+
+                ESP_LOGE(TAG, "请重新进行蓝牙配网");
+            }
         }
 
         // This will block the loop until the activation is done or timeout
@@ -529,7 +515,7 @@ void Application::CheckNewVersion() {
 /***********************************************
 * 增加的在设备启动时需要读取的变量
 ***********************************************/
-void Application::InitializeMySystem() {
+void Application::InitializeGloableVar() {
     GloableVar::init_ntp_time();
     vTaskDelay(pdMS_TO_TICKS(500));
     ESP_LOGI(TAG, "NTP server时间同步");
@@ -564,7 +550,9 @@ void Application::InitializeMySystem() {
     static McpServerWithAlarm mcp_server2;
     mcp_server2.Init();
     ESP_LOGI(TAG, "初始化闹钟MCP成功");
+}
 
+void Application::InitializeMqtt() {
     // 音视频功能
     VoiceCall *voiceCall = VoiceCall::get_instance();
     Settings settings("mqtt", false);
@@ -1211,42 +1199,6 @@ void Application::ResetProtocol() {
         // Reset protocol
         protocol_.reset();
     });
-}
-
-void Application::HandleVadStateChange(bool speaking) {
-    if (speaking) {
-        // 说话开始：取消任何待处理的静音结束定时器
-        if (vad_silence_debounce_timer_ != nullptr && 
-            xTimerIsTimerActive(vad_silence_debounce_timer_)) {
-            xTimerStop(vad_silence_debounce_timer_, 0);
-        }
-        // 立即通知 LED 等 UI 更新（原 MAIN_EVENT_VAD_CHANGE 的用途）
-        xEventGroupSetBits(event_group_, MAIN_EVENT_VAD_CHANGE);
-    } else {
-        // 静音可能开始：启动或重置防抖定时器
-        if (vad_silence_debounce_timer_ != nullptr) {
-            xTimerReset(vad_silence_debounce_timer_, 0);
-        } else {
-            // 降级：无定时器则立即通知
-            xEventGroupSetBits(event_group_, MAIN_EVENT_VAD_CHANGE);
-        }
-    }
-}
-
-void Application::VadSilenceDebounceCallback(TimerHandle_t xTimer) {
-    Application* app = static_cast<Application*>(pvTimerGetTimerID(xTimer));
-    if (app) {
-        app->OnVadSilenceConfirmed();
-    }
-}
-
-void Application::OnVadSilenceConfirmed() {
-    // 真正的静音持续超过防抖时间，确认说话结束
-    // 设置一个专门的事件（或者复用 MAIN_EVENT_VAD_CHANGE 但增加标志）
-    // 这里我们复用 MAIN_EVENT_VAD_CHANGE，但为了区分可新增一个事件
-    // 为了简单，直接调用原有的 VAD CHANGE 处理，并在主循环中根据状态执行动作
-    xEventGroupSetBits(event_group_, MAIN_EVENT_VAD_CHANGE);
-    // 如果你需要专门处理静音确认，可以定义 MAIN_EVENT_VAD_SILENCE_CONFIRMED
 }
 
 void Application::AddAudioData(AudioStreamPacket&& packet) {

@@ -3,6 +3,7 @@
 
 #include <functional>
 #include <string>
+#include "http_client.h"
 
 #include <esp_err.h>
 #include "board.h"
@@ -32,9 +33,7 @@ public:
     std::string GetCheckVersionUrl();
 	std::unique_ptr<Http> SetupHttp();
 
-    esp_err_t SendActivationCode(const std::string& deviceId, const std::string& activationCode);
-
-    esp_err_t SendActivationCode(const std::string& deviceId);
+    esp_err_t SendActivationCode(const std::string& deviceId, const std::string& blue_device, const std::string& board_id);
 private:
     std::string activation_message_;
     std::string activation_code_;
@@ -57,6 +56,7 @@ private:
     bool IsNewVersionAvailable(const std::string& currentVersion, const std::string& newVersion);
     std::string GetActivationPayload();
     
+    std::shared_ptr<HttpClient> http_client_ = nullptr;
 };
 
 #endif // _OTA_H

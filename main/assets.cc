@@ -396,19 +396,21 @@ bool Assets::Download(std::string url, std::function<void(int progress, size_t s
 
     // 下载新的资源文件
     auto network = Board::GetInstance().GetNetwork();
-    auto http = network->CreateHttp(0);
+    auto http_unique = network->CreateHttp(0);
+    std::shared_ptr<Http> shared_http = std::move(http_unique);
+    http_client_ = std::static_pointer_cast<HttpClient>(shared_http);
     
-    if (!http->Open("GET", url)) {
+    if (!http_client_->Open("GET", url)) {
         ESP_LOGE(TAG, "Failed to open HTTP connection");
         return false;
     }
 
-    if (http->GetStatusCode() != 200) {
-        ESP_LOGE(TAG, "Failed to get assets, status code: %d", http->GetStatusCode());
+    if (http_client_->GetStatusCode() != 200) {
+        ESP_LOGE(TAG, "Failed to get assets, status code: %d", http_client_->GetStatusCode());
         return false;
     }
 
-    size_t content_length = http->GetBodyLength();
+    size_t content_length = http_client_->GetBodyLength();
     if (content_length == 0) {
         ESP_LOGE(TAG, "Failed to get content length");
         return false;
@@ -437,7 +439,7 @@ bool Assets::Download(std::string url, std::function<void(int progress, size_t s
     auto last_calc_time = esp_timer_get_time();
     
     while (true) {
-        int ret = http->Read(buffer, sizeof(buffer));
+        int ret = http_client_->Read(buffer, sizeof(buffer));
         if (ret < 0) {
             ESP_LOGE(TAG, "Failed to read HTTP data: %s", esp_err_to_name(ret));
             return false;
@@ -496,7 +498,7 @@ bool Assets::Download(std::string url, std::function<void(int progress, size_t s
         }
     }
     
-    http->Close();
+    http_client_->Close();
 
     if (total_written != content_length) {
         ESP_LOGE(TAG, "Downloaded size (%u) does not match expected size (%u)", total_written, content_length);

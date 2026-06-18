@@ -1,6 +1,7 @@
 #include "board.h"
 #include "system_info.h"
 #include "settings.h"
+#include "constants.h"
 #include "display/display.h"
 #include "display/oled_display.h"
 #include "assets/lang_config.h"
@@ -21,6 +22,7 @@ Board::Board() {
         settings.SetString("uuid", uuid_);
     }
     ESP_LOGI(TAG, "UUID=%s SKU=%s", uuid_.c_str(), BOARD_NAME);
+    board_id = uuid_;
 }
 
 std::string Board::GenerateUuid() {
