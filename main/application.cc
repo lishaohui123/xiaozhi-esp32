@@ -545,14 +545,14 @@ void Application::InitializeGloableVar() {
     }
     vTaskDelay(pdMS_TO_TICKS(500));
     ESP_LOGI(TAG, "初始化闹钟管理器成功");
+}
 
+void Application::InitializeMqtt() {
     // 初始化MCP服务器（带闹钟功能）
     static McpServerWithAlarm mcp_server2;
     mcp_server2.Init();
     ESP_LOGI(TAG, "初始化闹钟MCP成功");
-}
 
-void Application::InitializeMqtt() {
     // 音视频功能
     VoiceCall *voiceCall = VoiceCall::get_instance();
     Settings settings("mqtt", false);

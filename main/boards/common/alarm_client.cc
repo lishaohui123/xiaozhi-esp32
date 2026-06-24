@@ -80,8 +80,21 @@ std::string AlarmClient::SendRequest(const std::string& path, const std::string&
         return "{\"success\": false, \"message\": \"Failed to open connection\"}";
     }
         
-    // 读取响应
-    std::string response = http_client_->ReadAll();
+    // 分块读取响应体
+    std::string response;
+    char buffer[256];
+    while (true) {
+        int ret = http_client_->Read(buffer, sizeof(buffer));
+        if (ret < 0) {
+            ESP_LOGE(TAG, "Failed to read response body: %s", esp_err_to_name(ret));
+            break;
+        }
+        if (ret == 0) {
+            break;
+        }
+        response.append(buffer, ret);
+    }
+
     int status_code = http_client_->GetStatusCode();
         
     http_client_->Close();

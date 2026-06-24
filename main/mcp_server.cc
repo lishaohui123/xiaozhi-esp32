@@ -241,7 +241,7 @@ void McpServer::AddCommonTools() {
     
 #endif
 
-    
+ #if 0   
     /*************************************
     * 安全和心理小卫士的MCP
     *************************************/
@@ -308,7 +308,7 @@ void McpServer::AddCommonTools() {
             McpService.shareSecret(secret, emotion, topic);
             return "{\"success\": true, \"message\": \"谢谢你的分享宝贝。\"}";
         });
-
+#endif
 
     /*************************************
     * 故事和音乐相关的MCP
@@ -842,6 +842,7 @@ void McpServer::AddCommonTools() {
             return "{\"success\": true, \"message\": \"\"}";
         });
 
+#if 0
     // 添加设备验证码相关工具
     AddTool("self.device.generate_verification_code",
         "生成新的设备验证码。验证码为6位数字，有效期为10分钟。\n"
@@ -865,8 +866,9 @@ void McpServer::AddCommonTools() {
             
             return std::string(buffer);
         });
+#endif
 
-
+#if 0
     /*************************************
      * 控制轮子马达的指令
      **************************************/
@@ -956,7 +958,7 @@ void McpServer::AddCommonTools() {
             motor->Stop();
             return "{\"success\": true, \"message\": \"小主人，我已经已停止\"}";
         });
-
+#endif
 
     
     // Restore the original tools list to the end of the tools list

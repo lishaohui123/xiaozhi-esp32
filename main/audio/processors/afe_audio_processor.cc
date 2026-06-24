@@ -169,10 +169,10 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srm
     // 启用自动增益控制（AGC）并调高增益
     afe_config->agc_init = true;
     afe_config->agc_mode = AFE_AGC_MODE_WEBRTC;      // 使用 WebRTC AGC
-    afe_config->agc_compression_gain_db = 15;        // 提高增益（默认9，远场可12~18）
+    afe_config->agc_compression_gain_db = 12;        // 提高增益（默认9，远场可12~18）
     afe_config->agc_target_level_dbfs = -6;           // 目标电平 -3 dBFS
 
-    // 噪声抑制：改用温和的 WebRTC NS，避免神经网络抑制弱语音
+    // 噪声抑制：改用温和的 WebRTC NS，避免神经网络抑制弱语音1
     afe_config->ns_init = true;
     afe_config->afe_ns_mode = AFE_NS_MODE_NET;
     afe_config->ns_model_name = NULL;
