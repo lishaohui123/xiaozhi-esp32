@@ -463,14 +463,14 @@ void Application::CheckNewVersion() {
         }
         retry_count = 0;
         retry_delay = 10; // Reset retry delay
-
+#if 0 // 去掉主动更新固件
         if (ota_->HasNewVersion()) {
             if (UpgradeFirmware(ota_->GetFirmwareUrl(), ota_->GetFirmwareVersion())) {
                 return; // This line will never be reached after reboot
             }
             // If upgrade failed, continue to normal operation
         }
-
+#endif
         // No new version, mark the current version as valid
         ota_->MarkCurrentVersionValid();
         if (!ota_->HasActivationCode() && !ota_->HasActivationChallenge()) {
@@ -537,7 +537,9 @@ void Application::InitializeGloableVar() {
         ESP_LOGE(TAG, "读取闹钟环境变量失败"); 
     }
     vTaskDelay(pdMS_TO_TICKS(500));
+}
 
+void Application::InitializeMqtt() {
     // 初始化闹钟管理器（使用数据库）
     auto& alarm_manager = AlarmManager::GetInstance();
     if (!alarm_manager.Initialize(OTA_URI, GloableVar::device_id)) {
@@ -545,9 +547,7 @@ void Application::InitializeGloableVar() {
     }
     vTaskDelay(pdMS_TO_TICKS(500));
     ESP_LOGI(TAG, "初始化闹钟管理器成功");
-}
 
-void Application::InitializeMqtt() {
     // 初始化MCP服务器（带闹钟功能）
     static McpServerWithAlarm mcp_server2;
     mcp_server2.Init();
