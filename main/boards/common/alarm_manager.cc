@@ -21,6 +21,7 @@
 #include <iomanip>
 #include <regex>
 #include "constants.h"
+#include "esp_sntp.h"
 
 #define TAG "AlarmManager"
 
@@ -76,7 +77,10 @@ AlarmManager::AlarmManager() :
     alarms_(),
     alarms_mutex_(),
     last_triggered_id_() {
-    alarm_task_queue_.clear();
+    {
+        std::lock_guard<std::mutex> lock(alarm_queue_mutex_);
+        alarm_task_queue_.clear();
+    }
     alarm_trigger_task_running_ = true;
 }
 
@@ -1188,6 +1192,14 @@ std::string AlarmManager::NormalizeTimeString(const std::string& input) {
             }
             
             if (is_alone) {
+                // 检查前一个字符是否是"小"（避免"小时"变成"小小时"）
+                if (pos >= 3) {
+                    std::string prev_char = result.substr(pos - 3, 3);
+                    if (prev_char == "小") {
+                        pos = result.find("时", pos + 3);
+                        continue;
+                    }
+                }
                 result.replace(pos, 3, "小时"); // 用"小时"替换"时"
                 pos = result.find("时", pos + 6); // "小时"是6字节，跳到后面继续查找
             } else {
@@ -1208,6 +1220,14 @@ std::string AlarmManager::NormalizeTimeString(const std::string& input) {
             }
             
             if (is_alone) {
+                // 检查前一个字符是否是"钟"（避免"分钟"变成"分分钟"）
+                if (pos >= 3) {
+                    std::string prev_char = result.substr(pos - 3, 3);
+                    if (prev_char == "钟") {
+                        pos = result.find("分", pos + 3);
+                        continue;
+                    }
+                }
                 result.replace(pos, 3, "分钟"); // 用"分钟"替换"分"
                 pos = result.find("分", pos + 6); // "分钟"是6字节
             } else {
@@ -1411,6 +1431,14 @@ bool AlarmManager::ParseHoursOnly(const std::string& normalized, int& minutes) {
     }
     
     std::string hour_str = normalized.substr(0, hour_pos);
+    
+    // 处理"半"小时 = 30分钟
+    if (hour_str == "半") {
+        minutes = 30;
+        ESP_LOGI(TAG, "Hours only - Half hour detected: 30 minutes");
+        return true;
+    }
+    
     int hours = ExtractNumberFromSegment(hour_str);
     ESP_LOGI(TAG, "Hours only - Hour segment: '%s' -> %d", hour_str.c_str(), hours);
     
@@ -1462,8 +1490,8 @@ std::string AlarmManager::CalculateAbsoluteTime(int minutes_from_now) {
     char buffer[6]; // HH:MM\0
     snprintf(buffer, sizeof(buffer), "%02d:%02d", timeinfo->tm_hour, timeinfo->tm_min);
     
-    ESP_LOGI(TAG, "CalculateAbsoluteTime: now=%lld, +%d minutes = %s", 
-             (long long)now, minutes_from_now, buffer);
+    ESP_LOGI(TAG, "CalculateAbsoluteTime: now=%ld, +%d minutes = %s", 
+             (long)now, minutes_from_now, buffer);
     
     return std::string(buffer);
 }
@@ -2340,13 +2368,21 @@ void AlarmManager::CheckAlarms() {
 
     // 检查每个闹钟
     {
-        std::lock_guard<std::mutex> lock(alarms_mutex_);
+        bool should_trigger = false;
+        {
+            std::lock_guard<std::mutex> lock(alarms_mutex_);
 
-        for (const auto& alarm : alarms_) {
-            if (IsAlarmTimeMatch(alarm, timeinfo)) {
-                alarm_task_queue_.push_back(timeinfo);
-                break;
+            for (const auto& alarm : alarms_) {
+                if (IsAlarmTimeMatch(alarm, timeinfo)) {
+                    should_trigger = true;
+                    break;
+                }
             }
+        }
+
+        if (should_trigger) {
+            std::lock_guard<std::mutex> lock(alarm_queue_mutex_);
+            alarm_task_queue_.push_back(timeinfo);
         }
     }
 }
@@ -2361,9 +2397,18 @@ void AlarmManager::alarm_trigger_task(void *arg) {
     AlarmManager* alarm_manager = static_cast<AlarmManager*>(arg);
 
     while (alarm_manager->alarm_trigger_task_running_) {
-        if (!alarm_manager->alarm_task_queue_.empty()) {
-            struct tm timeinfo = alarm_manager->alarm_task_queue_.front();
-            alarm_manager->alarm_task_queue_.pop_front();
+        struct tm timeinfo = {};
+        bool has_task = false;
+        {
+            std::lock_guard<std::mutex> lock(alarm_manager->alarm_queue_mutex_);
+            if (!alarm_manager->alarm_task_queue_.empty()) {
+                timeinfo = alarm_manager->alarm_task_queue_.front();
+                alarm_manager->alarm_task_queue_.pop_front();
+                has_task = true;
+            }
+        }
+
+        if (has_task) {
 
             std::vector<std::string> once_alarm;
             {

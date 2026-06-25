@@ -110,6 +110,7 @@ private:
     // 其他数据成员
     std::vector<AlarmInfo> alarms_;
     std::mutex alarms_mutex_;
+    std::mutex alarm_queue_mutex_;
     std::string last_triggered_id_;
 
     std::deque<struct tm> alarm_task_queue_;
