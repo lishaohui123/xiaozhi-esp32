@@ -6,6 +6,7 @@
 #include <condition_variable>
 #include <chrono>
 #include <mutex>
+#include <atomic>
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -120,7 +121,7 @@ public:
     
     EventGroupHandle_t event_group_;
 
-    volatile bool is_voice_out_;
+    std::atomic<bool> is_voice_out_{false};
 
     // 为了解决播放音乐时的afe的冲突问题
     void SetBypassAecReference(bool bypass) { bypass_aec_reference_ = bypass; }

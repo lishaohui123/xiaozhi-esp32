@@ -6,6 +6,7 @@
 #include <map>
 #include <ctime>
 #include <mutex>
+#include <atomic>
 #include <functional>
 #include <deque>
 #include <unordered_map>
@@ -114,7 +115,7 @@ private:
     std::string last_triggered_id_;
 
     std::deque<struct tm> alarm_task_queue_;
-    volatile bool alarm_trigger_task_running_;
+    std::atomic<bool> alarm_trigger_task_running_{false};
     
     // 节假日缓存
     std::unordered_map<std::string, HolidayInfo> holiday_cache_;

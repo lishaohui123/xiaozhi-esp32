@@ -1,6 +1,7 @@
 #ifndef VOICE_CALL_H
 #define VOICE_CALL_H
 
+#include <atomic>
 #include "esp_err.h"
 #include "mqtt_client.h"
 #include "lwip/sockets.h"
@@ -238,12 +239,12 @@ private:
     }
 
 public:
-    volatile bool  udp_send_task_exit = true;
-    volatile bool udp_receive_task_exit = true;
+    std::atomic<bool> udp_send_task_exit{true};
+    std::atomic<bool> udp_receive_task_exit{true};
 
     // 任务状态控制
-    volatile bool m_udp_receive_task_running = false;
-    volatile bool m_udp_send_task_running = false;
+    std::atomic<bool> m_udp_receive_task_running{false};
+    std::atomic<bool> m_udp_send_task_running{false};
 
 private:
     // 单例实例

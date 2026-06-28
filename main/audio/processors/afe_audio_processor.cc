@@ -168,7 +168,7 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srm
 
     // 启用自动增益控制（AGC）并调高增益
     afe_config->agc_init = true;
-    afe_config->agc_mode = AFE_AGC_MODE_WAKENET;      // 使用 WebRTC AGC
+    afe_config->agc_mode = AFE_AGC_MODE_WEBRTC;      // 使用 WebRTC AGC
     afe_config->agc_compression_gain_db = 18;        // 提高增益（默认9，远场可12~18）
     afe_config->agc_target_level_dbfs = -6;           // 目标电平 -3 dBFS
 
@@ -179,8 +179,8 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srm
 
     // 调整 VAD 参数，降低远场语音触发的门槛
     afe_config->vad_min_speech_ms = 64;   // 语音最短持续150ms，避免短语音被丢弃
-    afe_config->vad_min_noise_ms = 2000;
-    afe_config->vad_delay_ms = 1200;        // 延迟200ms，让VAD能缓存语音开头
+    afe_config->vad_min_noise_ms = 1500;
+    afe_config->vad_delay_ms = 500;        // 延迟200ms，让VAD能缓存语音开头
 
     afe_iface_ = esp_afe_handle_from_config(afe_config);
     afe_data_ = afe_iface_->create_from_config(afe_config);

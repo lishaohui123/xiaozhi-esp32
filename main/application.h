@@ -129,7 +129,6 @@ public:
     void AddAudioData(AudioStreamPacket&& packet);
 
     VoiceCall* voice_call_;
-    volatile bool is_voice_call_;
 #endif
 private:
     Application();
