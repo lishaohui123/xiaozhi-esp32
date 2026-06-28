@@ -100,7 +100,6 @@ static const char* get_call_state_str(call_state_t state) {
 // VoiceCall类实现
 VoiceCall::VoiceCall() {
     // 通话信息初始化
-    m_call_info.state = CALL_STATE_IDLE;
 
     // Initialize reconnect timer
     esp_timer_create_args_t reconnect_timer_args = {

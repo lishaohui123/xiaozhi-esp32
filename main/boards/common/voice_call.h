@@ -70,7 +70,7 @@ typedef struct {
 
 // 通话信息结构体
 typedef struct {
-    call_state_t state ;
+    std::atomic<call_state_t> state{CALL_STATE_IDLE};
     std::string roomSn;
     std::string parent_openid;
     std::string server_ip;
