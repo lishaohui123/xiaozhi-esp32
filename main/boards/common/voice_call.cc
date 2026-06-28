@@ -280,6 +280,11 @@ esp_err_t VoiceCall::initMqtt(const std::string& device_id, const std::string& d
 }
 
 void VoiceCall::initUdp() {
+    // 关闭之前的套接字（防止泄漏）
+    if (client_sock_ >= 0) {
+        close(client_sock_);
+    }
+    
     // 创建套接字
     client_sock_ = socket(AF_INET, SOCK_DGRAM, 0);
     if (client_sock_ < 0) {

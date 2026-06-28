@@ -141,10 +141,10 @@ private:
     std::mutex lyrics_mutex_;  // 保护lyrics_数组的互斥锁
     std::atomic<int> current_lyric_index_;
     std::atomic<bool> is_lyric_running_;
-    volatile std::atomic<bool> is_playing_;
-    volatile std::atomic<bool> is_downloading_;
-    volatile std::atomic<int> is_state_completed_;
-    volatile std::atomic<int> is_play_audios_status_;
+    std::atomic<bool> is_playing_;
+    std::atomic<bool> is_downloading_;
+    std::atomic<int> is_state_completed_;
+    std::atomic<int> is_play_audios_status_;
     int64_t current_play_time_ms_;  // 当前播放时间(毫秒)
     int64_t last_frame_time_ms_;    // 上一帧的时间戳
     int total_frames_decoded_;      // 已解码的帧数

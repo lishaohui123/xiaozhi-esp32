@@ -1518,18 +1518,19 @@ void Esp32Music::DownloadAudioStreamTask(void* arg) {
     ESP_LOGI(TAG, "DownloadAudioStreamTask started");
     
     auto* params = static_cast<DownloadTaskParams*>(arg);
+    auto* self = params->self;
+    std::string music_url = std::move(params->music_url);
+    delete params;
 
-    params->self->is_downloaded = false;
-    params->self->DownloadAudioStreamImpl(params->music_url);
+    self->is_downloaded = false;
+    self->DownloadAudioStreamImpl(music_url);
     
     ESP_LOGI(TAG, "DownloadAudioStreamTask finished");
-
-    params->self->is_downloaded = true;
+    self->is_downloaded = true;
 
     // 🔥 关键：通知下载完成
-    params->self->signalDownloadComplete();
+    self->signalDownloadComplete();
 
-    delete params;
 
     // vTaskDelete(nullptr);
     while (true) vTaskDelay(portMAX_DELAY);
@@ -1574,8 +1575,12 @@ void Esp32Music::PlayAudiosTask(void* arg) {
     
     auto* params = static_cast<PlayAudiosTaskParams*>(arg);
     if (params) {
-        params->self->PlayAudiosImpl(params->work_id, params->audio_infos, params->cur);
+        auto* self = params->self;
+        std::string work_id = params->work_id;
+        std::vector<AudioInfo> audio_infos = std::move(params->audio_infos);
+        int32_t cur = params->cur;
         delete params;
+        self->PlayAudiosImpl(work_id, audio_infos, cur);
     }
     
     ESP_LOGI(TAG, "PlayAudiosTask finished");
@@ -2732,8 +2737,8 @@ void Esp32Music::PlayAudioStream() {
                     std::unique_lock<std::mutex> lock(buffer_mutex_);
                     
                     if (total_buffer_fetches % 50 == 0) {
-                        ESP_LOGI(TAG, "缓冲区状态 - 大小: %d 字节，队列长度: %d，下载状态: %d", 
-                                buffer_size_.load(std::memory_order_relaxed), audio_buffer_.size(), is_downloading_);
+                        ESP_LOGI(TAG, "缓冲区状态 - 大小: %d 字节，队列长度: %d", 
+                                buffer_size_.load(std::memory_order_relaxed), audio_buffer_.size());
                     }
                     
                     if (audio_buffer_.empty()) {
