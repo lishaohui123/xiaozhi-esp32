@@ -837,7 +837,7 @@ void McpServer::AddCommonTools() {
             bool auto_answer = properties["auto_answer"].value<bool>();
             
             VoiceCall *voiceCall = VoiceCall::get_instance();
-            voiceCall->make_call(member);
+            voiceCall->make_call_async(member);
 
             return "{\"success\": true, \"message\": \"\"}";
         });

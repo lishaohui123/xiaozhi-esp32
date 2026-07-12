@@ -175,6 +175,8 @@ public:
 
     // 发起通话
     void make_call(std::string member);
+    // 发起通话（异步，不阻塞调用线程）
+    void make_call_async(const std::string& member);
 
     // MCP调用生成设备验证码
     std::string mcp_generate_verification_code();
@@ -291,12 +293,19 @@ private:
     StackType_t* m_udp_send_task_stack_;
     StaticTask_t* m_udp_send_task_tcb_;
     bool m_udp_send_task_static_allocated_;
+    // 🔥 添加电话异步任务的静态分配相关成员
+    static constexpr uint32_t PHONE_CALL_STACK_SIZE = 8192;
+    StackType_t* m_phone_call_stack_;
+    StaticTask_t* m_phone_call_tcb_;
+    TaskHandle_t m_phone_call_task_handle_;
 
     // socket事件组
     EventGroupHandle_t event_group_ = nullptr;
 
     // 删除复杂的事件组标志位，改用简单状态
     bool websocket_reconnect_failed_;
+
+    std::string phone_member_;
 };
 
 #endif // VOICE_CALL_H

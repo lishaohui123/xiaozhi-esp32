@@ -169,8 +169,8 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srm
     // 启用自动增益控制（AGC）并调高增益
     afe_config->agc_init = true;
     afe_config->agc_mode = AFE_AGC_MODE_WEBRTC;      // 使用 WebRTC AGC
-    afe_config->agc_compression_gain_db = 18;        // 提高增益（默认9，远场可12~18）
-    afe_config->agc_target_level_dbfs = -6;           // 目标电平 -3 dBFS
+    afe_config->agc_compression_gain_db = 24;        // 提高到24dB，适配儿童轻声
+    afe_config->agc_target_level_dbfs = -6;           // 目标电平 -6 dBFS
 
     // 噪声抑制：改用温和的 WebRTC NS，避免神经网络抑制弱语音1
     afe_config->ns_init = false;
@@ -178,7 +178,7 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srm
     afe_config->ns_model_name = NULL;
 
     // 调整 VAD 参数，降低远场语音触发的门槛
-    afe_config->vad_min_speech_ms = 64;   // 语音最短持续150ms，避免短语音被丢弃
+    afe_config->vad_min_speech_ms = 32;   // 降为32ms，儿童短词也能触发VAD
     afe_config->vad_min_noise_ms = 1500;
     afe_config->vad_delay_ms = 500;        // 延迟200ms，让VAD能缓存语音开头
 

@@ -147,7 +147,10 @@ VoiceCall::VoiceCall() {
     m_udp_send_task_stack_ = nullptr;
     m_udp_send_task_tcb_ = nullptr;
     m_udp_send_task_static_allocated_ = false;
-    
+    m_phone_call_stack_ = nullptr;
+    m_phone_call_tcb_ = nullptr;
+    m_phone_call_task_handle_ = nullptr;
+
     // UDP状态初始化
     m_udp_receive_task_running = false;
     m_udp_send_task_running = false;
@@ -212,6 +215,15 @@ VoiceCall::~VoiceCall() {
     if (m_udp_send_task_tcb_ != nullptr) {
         heap_caps_free(m_udp_send_task_tcb_);
         m_udp_send_task_tcb_ = nullptr;
+    }
+    // 🔥 释放电话异步任务的内存
+    if (m_phone_call_stack_ != nullptr) {
+        heap_caps_free(m_phone_call_stack_);
+        m_phone_call_stack_ = nullptr;
+    }
+    if (m_phone_call_tcb_ != nullptr) {
+        heap_caps_free(m_phone_call_tcb_);
+        m_phone_call_tcb_ = nullptr;
     }
 }
 
@@ -350,7 +362,7 @@ void VoiceCall::start_audio_processing() {
 
     // 1、启动通话状态查询的任务
     {
-        esp_timer_start_once(call_status_timer_, CALL_STATUS_INTERVAL_MS * 1000);
+        esp_timer_start_once(call_status_timer_, CALL_STATUS_INTERVAL_MS * 500);
     }
 
     // 2、接收语音进程；
@@ -581,6 +593,42 @@ void VoiceCall::make_call(std::string member) {
     return;
 }
 
+void VoiceCall::make_call_async(const std::string& member) {
+    // 杀掉上一次的 phone_call 任务
+    if (m_phone_call_task_handle_ != nullptr) {
+        vTaskDelete(m_phone_call_task_handle_);
+        m_phone_call_task_handle_ = nullptr;
+    }
+
+    // 与 start_audio_processing 模式一致：只申请一次内存，一直持有
+    if (m_phone_call_stack_ == nullptr) {
+        m_phone_call_stack_ = (StackType_t*)heap_caps_malloc(
+            PHONE_CALL_STACK_SIZE * sizeof(StackType_t),
+            MALLOC_CAP_SPIRAM
+        );
+        assert(m_phone_call_stack_ != nullptr);
+    }
+
+    if (m_phone_call_tcb_ == nullptr) {
+        m_phone_call_tcb_ = (StaticTask_t*)heap_caps_malloc(
+            sizeof(StaticTask_t),
+            MALLOC_CAP_INTERNAL
+        );
+        assert(m_phone_call_tcb_ != nullptr);
+    }
+
+    this->phone_member_ = member;
+
+    m_phone_call_task_handle_ = xTaskCreateStatic(
+        [](void* arg) {
+        VoiceCall* inst = (VoiceCall*)arg;
+        inst->make_call(inst->phone_member_);
+        while (true) vTaskDelay(portMAX_DELAY);  // 防止任务退出
+    }, "phone_call", PHONE_CALL_STACK_SIZE, this, 2, m_phone_call_stack_, m_phone_call_tcb_);
+
+    assert(m_phone_call_task_handle_ != nullptr);
+}
+
 std::string VoiceCall::mcp_generate_verification_code() {
     // 重新生成验证码
     regenerate_verification_code();
@@ -799,7 +847,7 @@ void VoiceCall::handle_call_end() {
         ESP_LOGI(TAG, "Call ended");
     }
     else {
-        esp_timer_start_once(call_status_timer_, CALL_STATUS_INTERVAL_MS * 1000);
+        esp_timer_start_once(call_status_timer_, CALL_STATUS_INTERVAL_MS * 500);
     }
 }
 

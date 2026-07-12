@@ -1876,19 +1876,21 @@ void Esp32Music::DownloadAudioStreamImpl(const std::string& music_url) {
     // 设置请求头
     http_client_->SetHeader("Accept", "*/*");
 
-    if (!http_client_->Open("GET", music_url)) {
-        ESP_LOGE(TAG, "无法连接到音乐流URL: %s", music_url.c_str());
-        http_client_->Close();
-        is_downloading_ = false;
-        return;
+   if (!http_client_->Open("GET", music_url)) {
+       ESP_LOGE(TAG, "无法连接到音乐流URL: %s", music_url.c_str());
+       http_client_->Close();
+       http_client_.reset();
+       is_downloading_ = false;
+       return;
     }
 
-    int status_code = http_client_->GetStatusCode();
-    if (status_code != 200 && status_code != 206) {  // 206 for partial content
-        ESP_LOGE(TAG, "HTTP GET失败，状态码: %d", status_code);
-        http_client_->Close();
-        is_downloading_ = false;
-        return;
+   int status_code = http_client_->GetStatusCode();
+   if (status_code != 200 && status_code != 206) {  // 206 for partial content
+       ESP_LOGE(TAG, "HTTP GET失败，状态码: %d", status_code);
+       http_client_->Close();
+       http_client_.reset();
+       is_downloading_ = false;
+       return;
     }
 
     ESP_LOGI(TAG, "开始下载音频流，状态: %d", status_code);
@@ -2097,12 +2099,13 @@ void Esp32Music::DownloadAudioStreamImpl(const std::string& music_url) {
 
         // 🔥 每处理完一个 chunk 后让出 CPU
         taskYIELD();
-    }
-    
-    http_client_->Close();
-    is_downloading_ = false;
-    
-    // 🔥 下载完成统计
+   }
+   
+   http_client_->Close();
+   http_client_.reset();
+   is_downloading_ = false;
+   
+   // 🔥 下载完成统计
     auto end_time = std::chrono::steady_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
     

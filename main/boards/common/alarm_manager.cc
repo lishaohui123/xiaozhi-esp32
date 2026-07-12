@@ -2269,6 +2269,11 @@ void AlarmManager::PlayTtsAudioStream(const std::string& text, int repeat) {
                                                 url_encode(text));
     
     music->Play(url, repeat);
+    // 释放HTTP客户端残留连接
+    alarm_client_.http_client_.reset();
+    if (auto esp32music = dynamic_cast<Esp32Music*>(Board::GetInstance().GetMusic())) {
+        esp32music->http_client_.reset();
+    }
 }
 
 void AlarmManager::PlayTtsAudioStreamVoice(const std::string& text, int repeat) {
@@ -2286,6 +2291,11 @@ void AlarmManager::PlayTtsAudioStreamVoice(const std::string& text, int repeat) 
                                                 url_encode(text));
     
     music->PlayVoice(url, repeat);
+    // 释放HTTP客户端残留连接
+    alarm_client_.http_client_.reset();
+    if (auto esp32music = dynamic_cast<Esp32Music*>(Board::GetInstance().GetMusic())) {
+        esp32music->http_client_.reset();
+    }
 }
 
 std::string AlarmManager::GetTips(long tipTemplateId) {
@@ -2301,6 +2311,7 @@ std::string AlarmManager::GetTips(long tipTemplateId) {
  *********************************************************************/
 void AlarmManager::TriggerAlarm(const AlarmInfo& alarm) {
     ESP_LOGI(TAG, "Alarm triggered: %s - %s", alarm.id.c_str(), alarm.message.c_str());
+    size_t mem_a = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     
     // 记录触发信息
     last_triggered_id_ = alarm.id;
@@ -2335,12 +2346,20 @@ void AlarmManager::TriggerAlarm(const AlarmInfo& alarm) {
         alarm_msg = "小主人，小主人，时间到了，时间到了，咱该" + alarm.message;
         repeat = 3;
     } else {
-        // 向后端获取提示语
+    // 向后端获取提示语
         alarm_msg = GetTips(alarm.tip_template_id);
         repeat = alarm_msg.size() < 15 ? 3 : 1;
     }
+    size_t mem_b = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    ESP_LOGI("MEMLEAK", "[TriggerAlarm] A=%d B=%d dA-B=%d", mem_a, mem_b, mem_a - mem_b);
     
     PlayTtsAudioStream(alarm_msg, repeat);
+    size_t mem_c = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    ESP_LOGI("MEMLEAK", "[TriggerAlarm] B=%d C=%d dB-C=%d", mem_b, mem_c, mem_b - mem_c);
+
+    alarm_client_.http_client_.reset();  // 主动释放最后一个 HttpClient
+    size_t mem_d = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    ESP_LOGI("MEMLEAK", "[TriggerAlarm] C=%d D=%d dC-D=%d total=%d", mem_c, mem_d, mem_c - mem_d, mem_a - mem_d);
 }
 
 /**************************************

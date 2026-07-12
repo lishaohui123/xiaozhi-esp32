@@ -47,7 +47,7 @@ private:
     std::string device_id_;
     bool initialized_;
 
-private:
+public:
     std::shared_ptr<HttpClient> http_client_;   // 复用 HTTP 客户端
     
 };

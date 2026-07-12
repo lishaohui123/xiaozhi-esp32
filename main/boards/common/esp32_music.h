@@ -128,6 +128,8 @@ public:
     virtual bool IsDownloading() const override { return is_downloading_; }
     virtual bool IsPlaying() const override { return is_playing_; }
 
+    std::shared_ptr<HttpClient> http_client_; // 复用 HTTP 客户端
+
 private:
     std::string last_downloaded_data_;
     std::string work_name_;
@@ -233,8 +235,6 @@ private:
     long total_mp3_data_consumed = 0;        // 实际解码消耗的MP3字节数
     std::mutex stats_mutex_;                 // 用于保护统计变量的互斥锁
 
-
-
 private:
     // 内存池配置
     static constexpr size_t MAX_CONCURRENT_CHUNKS = 128;          // 最大并发音频块数
@@ -298,7 +298,7 @@ private:
     static constexpr EventBits_t EVENT_WAIT_ALL = 
         EVENT_ALL_COMPLETE | EVENT_ANY_TERMINATION;
 
-    std::shared_ptr<HttpClient> http_client_; // 复用 HTTP 客户端
+
                                               
     // 流式播放结果
     enum class StreamingResult {

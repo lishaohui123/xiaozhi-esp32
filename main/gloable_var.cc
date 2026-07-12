@@ -101,8 +101,10 @@ void GloableVar::init_ntp_time() {
     ESP_LOGI(TAG, "Initializing NTP time synchronization");
     
     // 设置时区为东八区（北京时间）
-    setenv("TZ", "CST-8", 1);  // 中国标准时间，UTC+8
-    tzset();
+    if (getenv("TZ") == nullptr) {
+        setenv("TZ", "CST-8", 1);  // 中国标准时间，UTC+8
+        tzset();
+    }
     
     // 设置NTP服务器 - 使用更稳定的国内NTP服务器
     sntp_setoperatingmode(SNTP_OPMODE_POLL);

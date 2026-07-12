@@ -98,7 +98,8 @@ std::string AlarmClient::SendRequest(const std::string& path, const std::string&
     int status_code = http_client_->GetStatusCode();
         
     http_client_->Close();
-        
+    http_client_.reset();
+
     ESP_LOGI(TAG, "Response status code: %d", status_code);
         
     if (status_code >= 200 && status_code < 300) {
