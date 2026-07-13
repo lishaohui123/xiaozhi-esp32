@@ -151,7 +151,7 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srm
 
 #ifdef CONFIG_USE_DEVICE_AEC
     afe_config->aec_init = true;
-    afe_config->vad_init = true;
+    afe_config->vad_init = false;
 #else
     afe_config->aec_init = false;
     afe_config->vad_init = true;
@@ -331,7 +331,7 @@ void AfeAudioProcessor::AudioProcessorTask() {
 void AfeAudioProcessor::EnableDeviceAec(bool enable) {
     if (enable) {
 #if CONFIG_USE_DEVICE_AEC
-        afe_iface_->enable_vad(afe_data_);
+        afe_iface_->disable_vad(afe_data_);
         afe_iface_->enable_aec(afe_data_);
 #else
         ESP_LOGE(TAG, "Device AEC is not supported");
