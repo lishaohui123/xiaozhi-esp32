@@ -105,6 +105,9 @@ const LvglImage* OttoEmojiDisplay::GetEmojiImage(const char* emotion) {
     return default_emoji_collection.GetEmojiImage(emotion);
 }
 
+/**********************************
+ * 我们只设计有限的表情来满足所有表情的需要
+ **********************************/
 void OttoEmojiDisplay::SetEmotion(const char* emotion) {
     if (!emotion || !emotion_image_) {
         return;

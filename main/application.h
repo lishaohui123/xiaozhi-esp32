@@ -9,6 +9,7 @@
 #include <string>
 #include <mutex>
 #include <deque>
+#include <map>
 #include <memory>
 
 #include "protocol.h"
@@ -32,6 +33,22 @@
 #define MAIN_EVENT_START_LISTENING      (1 << 10)
 #define MAIN_EVENT_STOP_LISTENING       (1 << 11)
 #define MAIN_EVENT_STATE_CHANGED        (1 << 12)
+
+
+/* 引脚定义 */
+#define SW_Vibrating_GPIO_PIN    GPIO_NUM_4     /* 震动电机连接的GPIO端口 */
+#define BOOT_OUT_GPIO_PIN   GPIO_NUM_19         /* 蓝牙配网控制连接的GPIO端口 */
+#define Power_on_GPIO_PIN   GPIO_NUM_20         /* 电源开关控制连接的GPIO端口 */
+#define TOUCH_1_GPIO_PIN    GPIO_NUM_39         /* 触摸模块1控制连接的GPIO端口 */
+#define TOUCH_2_GPIO_PIN    GPIO_NUM_40         /* 触摸模块2控制连接的GPIO端口 */
+#define TOUCH_3_GPIO_PIN    GPIO_NUM_2          /* 触摸模块3控制连接的GPIO端口 */
+#define TOUCH_4_GPIO_PIN    GPIO_NUM_1          /* 触摸模块4控制连接的GPIO端口 */
+
+
+#define SW_Vibrating(x)          do { x ?                                \
+                              gpio_set_level(SW_Vibrating_GPIO_PIN, 1):  \
+                              gpio_set_level(SW_Vibrating_GPIO_PIN, 0);  \
+                            } while(0)  /* 电机开关 */
 
 
 enum AecMode {
@@ -123,6 +140,13 @@ public:
 
     void SetModeRealtime();
 
+    std::deque<std::string> touch_debounce_task_queue_;
+    std::map<std::string, gpio_num_t> touch_pin_map_;
+
+    std::deque<std::string> touch_task_queue_;
+
+    esp_timer_handle_t touch_timer_handle_ = nullptr;
+
 #if 1
     Protocol* GetProtocol() { return protocol_.get(); }
 
@@ -177,8 +201,22 @@ private:
 
     void InitializeMqtt();
 
+    void SW_Vibrating_init(void);
+
+    void InitializeDebounceTouchThread();
+    void TouchDebounceTask(void *arg);
+
+    void InitializeTouchThread();
+    void TouchTask(void *arg);
+
+    void TOUCH_1_init(void);
+    void TOUCH_2_init(void);
+    void TOUCH_3_init(void);
+    void TOUCH_4_init(void);
+
     // State change handler called by state machine
     void OnStateChanged(DeviceState old_state, DeviceState new_state);
+
 };
 
 

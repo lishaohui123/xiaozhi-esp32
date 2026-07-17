@@ -1098,6 +1098,13 @@ bool Esp32Music::PlayHdAudio(const std::string& audio_url) {
     return PlayVoice(audio_url, 1);
 }
 
+/***********************************
+ * 该函数是为了响应小龙的触摸语音
+ ***********************************/
+bool Esp32Music::PlayTouchAudio(const std::string& touch_url) {
+    return PlayVoice(touch_url, 1);
+}
+
 /**************************************
  * 允许接收通过url来调用，进行
  * 语音的播报

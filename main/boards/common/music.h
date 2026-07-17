@@ -12,6 +12,7 @@ public:
     virtual bool Play(const std::string& music_url, int repeat) = 0;
     virtual bool PlayVoice(const std::string& music_url, int repeat) = 0;
     virtual bool PlayHdAudio(const std::string &audio_url) = 0;
+    virtual bool PlayTouchAudio(const std::string &touch_url) = 0;
     virtual bool Play2(const std::string& music_url) = 0;
     virtual bool Stop() = 0;
     virtual std::string GetDownloadResult() = 0;

@@ -138,6 +138,7 @@ private:
     }
 
     void InitializeButtons() {
+#if 0
         boot_button_.OnClick([this]() {
             auto& app = Application::GetInstance();
             if (app.GetDeviceState() == kDeviceStateStarting) {
@@ -145,6 +146,10 @@ private:
                 return;
             }
             app.ToggleChatState();
+        });
+#endif
+        boot_button_.OnDoubleClick([this]() {    // 新增的双击 → 蓝牙配网
+            EnterWifiConfigMode();
         });
     }
 

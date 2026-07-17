@@ -17,6 +17,7 @@
 #include "constants.h"
 
 #include <cstring>
+#include <map>
 #include <esp_log.h>
 #include <cJSON.h>
 #include <driver/gpio.h>
@@ -24,6 +25,32 @@
 #include <font_awesome.h>
 
 #define TAG "Application"
+
+
+
+// URL编码函数
+static std::string url_encode(const std::string& str) {
+    std::string encoded;
+    char hex[4];
+    
+    for (size_t i = 0; i < str.length(); i++) {
+        unsigned char c = str[i];
+        
+        if ((c >= 'A' && c <= 'Z') ||
+            (c >= 'a' && c <= 'z') ||
+            (c >= '0' && c <= '9') ||
+            c == '-' || c == '_' || c == '.' || c == '~') {
+            encoded += c;
+        } else if (c == ' ') {
+            encoded += '+';  // 空格编码为'+'或'%20'
+        } else {
+            snprintf(hex, sizeof(hex), "%%%02X", c);
+            encoded += hex;
+        }
+    }
+    return encoded;
+}
+
 
 
 Application::Application() {
@@ -52,12 +79,30 @@ Application::Application() {
         .skip_unhandled_events = true
     };
     esp_timer_create(&clock_timer_args, &clock_timer_handle_);
+
+    touch_debounce_task_queue_.clear();
+    touch_task_queue_.clear();
+
+    // 触摸传感器的震动定时器
+    esp_timer_create_args_t touch_timer_args = {
+        .callback = [](void* arg) {
+            Application* app = (Application*)arg;
+            
+            SW_Vibrating(0);
+        },
+        .arg = this,
+    };
+    esp_timer_create(&touch_timer_args, &touch_timer_handle_);
 }
 
 Application::~Application() {
     if (clock_timer_handle_ != nullptr) {
         esp_timer_stop(clock_timer_handle_);
         esp_timer_delete(clock_timer_handle_);
+    }
+    if (touch_timer_handle_ != nullptr) {
+        esp_timer_stop(touch_timer_handle_);
+        esp_timer_delete(touch_timer_handle_);
     }
     vEventGroupDelete(event_group_);
 }
@@ -363,6 +408,16 @@ void Application::ActivationTask() {
     // Initialize the protocol
     InitializeProtocol();
 
+    SW_Vibrating_init();
+
+    InitializeDebounceTouchThread();
+    InitializeTouchThread();
+
+    TOUCH_1_init();
+    TOUCH_2_init();
+    TOUCH_3_init();
+    TOUCH_4_init();
+
     InitializeMqtt();
 
     // Signal completion to main loop
@@ -563,6 +618,214 @@ void Application::InitializeMqtt() {
     vTaskDelay(pdMS_TO_TICKS(500));
 
     ESP_LOGI(TAG, "初始化音视频功能成功");
+}
+
+void Application::SW_Vibrating_init(void)
+{
+    gpio_config_t gpio_init_struct = {0};
+
+    gpio_init_struct.intr_type = GPIO_INTR_DISABLE;         /* 失能引脚中断 */
+    gpio_init_struct.mode = GPIO_MODE_OUTPUT;               /* 输出模式 */
+    gpio_init_struct.pull_up_en = GPIO_PULLUP_ENABLE;       /* 使能上拉 */
+    gpio_init_struct.pull_down_en = GPIO_PULLDOWN_DISABLE;  /* 失能下拉 */
+    gpio_init_struct.pin_bit_mask = 1ull << SW_Vibrating_GPIO_PIN;   /* 设置的引脚的位掩码 */
+    gpio_config(&gpio_init_struct);                         /* 配置GPIO */
+
+    SW_Vibrating(0);                                        /* 关闭震动电机 */
+}
+
+/**************************
+ * 初始化触摸传感器对应的任务线程
+ **************************/
+void Application::InitializeDebounceTouchThread() {
+    touch_pin_map_["head"]  = TOUCH_1_GPIO_PIN;
+    touch_pin_map_["hand"]  = TOUCH_2_GPIO_PIN;
+    touch_pin_map_["chest"] = TOUCH_3_GPIO_PIN;
+    touch_pin_map_["tail"]  = TOUCH_4_GPIO_PIN;
+
+    xTaskCreate([](void* arg) {
+        auto this_ = (Application*)arg;
+        this_->TouchDebounceTask(arg);
+        vTaskDelete(NULL);
+    }, "touch_debounce_task", 1024 * 8, this, 3, nullptr);
+}
+
+/*****************************
+ * 这个线程任务只负责对触摸进行消抖
+ *****************************/
+void Application::TouchDebounceTask(void *arg) {
+    Application* application = static_cast<Application*>(arg);
+
+    std::map<std::string, int64_t> last_touch_map;
+    const int64_t repeat_debounce_ms = 9000;
+    const int level_confirm_ms = 500;
+    std::string region;
+    while (true) {
+        if (!application->touch_debounce_task_queue_.empty()) {
+            region = application->touch_debounce_task_queue_.front();
+            application->touch_debounce_task_queue_.pop_front();
+
+            // 第一级：等待 500ms 让电平稳定
+            vTaskDelay(pdMS_TO_TICKS(level_confirm_ms));
+
+            // 第二级：确认引脚仍然为高电平
+            gpio_num_t gpio = application->touch_pin_map_[region];
+            if (gpio_get_level(gpio) != 1) {
+                continue;
+            }
+
+            // 第三级：同一区域 8000ms 内不重复处理
+            int64_t now = esp_timer_get_time() / 1000;
+            auto& last = last_touch_map[region];
+            if (now - last >= repeat_debounce_ms) {
+                last = now;
+
+                static_cast<Application*>(arg)->touch_task_queue_.push_back(region);
+                ESP_LOGI(TAG, "触摸 %s", region.c_str());
+            }
+        }
+        else {
+            vTaskDelay(pdMS_TO_TICKS(20));
+        }
+    }
+}
+
+
+/*****************************
+ * 这个线程任务只负责任务的执行
+ *****************************/
+void Application::InitializeTouchThread() {
+    xTaskCreate([](void* arg) {
+        auto this_ = (Application*)arg;
+        this_->TouchTask(arg);
+        vTaskDelete(NULL);
+    }, "touch_task", 1024 * 8, this, 3, nullptr);
+}
+
+void Application::TouchTask(void *arg) {
+    Application* application = static_cast<Application*>(arg);
+
+    std::string region;
+    while (true) {
+        if (!application->touch_task_queue_.empty()) {
+            region = application->touch_task_queue_.front();
+            application->touch_task_queue_.pop_front();
+
+            // 正常对话时、电话时、播放故事时，都不触发的
+            if ((kDeviceStateIdle == GetDeviceState()) && (Application::GetInstance().GetAudioService().is_voice_out_ == false)) {
+                {
+                    SW_Vibrating(1);
+                    esp_timer_start_once(touch_timer_handle_, 3000 * 1000);
+                }
+
+                {
+                    std::string touch_url = std::format("{}touch?deviceId={}&voiceType={}&region={}", OTA_URI, GloableVar::device_id, url_encode(GloableVar::voice_type), region);
+                    Board::GetInstance().GetMusic()->PlayTouchAudio(touch_url);
+                } 
+            }
+        }
+        else {
+            vTaskDelay(pdMS_TO_TICKS(20));
+        }
+    }
+
+
+}
+
+/*******************
+ * 触摸传感器的中断函数
+ * 补充：
+ * 在中断函数中只做最轻量的操作
+ *******************/
+// 对应头部
+static void IRAM_ATTR exit_TOUCH_1_isr_handler(void *arg)
+{
+        static_cast<Application*>(arg)->touch_debounce_task_queue_.push_back("head");
+}
+
+static void IRAM_ATTR exit_TOUCH_2_isr_handler(void *arg)
+{
+    static_cast<Application*>(arg)->touch_debounce_task_queue_.push_back("hand");
+}
+
+static void IRAM_ATTR exit_TOUCH_3_isr_handler(void *arg)
+{
+    static_cast<Application*>(arg)->touch_debounce_task_queue_.push_back("chest");
+}
+
+static void IRAM_ATTR exit_TOUCH_4_isr_handler(void *arg)
+{
+    static_cast<Application*>(arg)->touch_debounce_task_queue_.push_back("tail");
+}
+
+/*****************
+ * 触摸传感器的中断注册
+ *****************/
+void Application::TOUCH_1_init(void)
+{
+    gpio_config_t gpio_init_struct;
+
+    /* 配置BOOT引脚和外部中断 */
+    gpio_init_struct.mode = GPIO_MODE_INPUT;                    /* 选择为输入模式 */
+    gpio_init_struct.pull_up_en = GPIO_PULLUP_ENABLE;           /* 上拉使能 */
+    gpio_init_struct.pull_down_en = GPIO_PULLDOWN_DISABLE;      /* 下拉失能 */
+    gpio_init_struct.intr_type = GPIO_INTR_POSEDGE;             /* 上升沿触发 */
+    gpio_init_struct.pin_bit_mask = 1ull << TOUCH_1_GPIO_PIN;   /* 设置的引脚的位掩码 */
+    ESP_ERROR_CHECK(gpio_config(&gpio_init_struct));            /* 配置使能 */
+    
+    /* 注册中断服务 */
+    ESP_ERROR_CHECK(gpio_install_isr_service(0));
+
+    /* 设置BOOT的中断回调函数 */
+    ESP_ERROR_CHECK(gpio_isr_handler_add(TOUCH_1_GPIO_PIN, exit_TOUCH_1_isr_handler, (void*) this));
+}
+
+void Application::TOUCH_2_init(void)
+{
+    gpio_config_t gpio_init_struct;
+
+    /* 配置BOOT引脚和外部中断 */
+    gpio_init_struct.mode = GPIO_MODE_INPUT;                    /* 选择为输入模式 */
+    gpio_init_struct.pull_up_en = GPIO_PULLUP_ENABLE;           /* 上拉使能 */
+    gpio_init_struct.pull_down_en = GPIO_PULLDOWN_DISABLE;      /* 下拉失能 */
+    gpio_init_struct.intr_type = GPIO_INTR_POSEDGE;             /* 上升沿触发 */
+    gpio_init_struct.pin_bit_mask = 1ull << TOUCH_2_GPIO_PIN;   /* 设置的引脚的位掩码 */
+    ESP_ERROR_CHECK(gpio_config(&gpio_init_struct));            /* 配置使能 */
+    
+    /* 设置BOOT的中断回调函数 */
+    ESP_ERROR_CHECK(gpio_isr_handler_add(TOUCH_2_GPIO_PIN, exit_TOUCH_2_isr_handler, (void*) this));
+}
+
+void Application::TOUCH_3_init(void)
+{
+    gpio_config_t gpio_init_struct;
+
+    /* 配置BOOT引脚和外部中断 */
+    gpio_init_struct.mode = GPIO_MODE_INPUT;                    /* 选择为输入模式 */
+    gpio_init_struct.pull_up_en = GPIO_PULLUP_ENABLE;           /* 上拉使能 */
+    gpio_init_struct.pull_down_en = GPIO_PULLDOWN_DISABLE;      /* 下拉失能 */
+    gpio_init_struct.intr_type = GPIO_INTR_POSEDGE;             /* 上升沿触发 */
+    gpio_init_struct.pin_bit_mask = 1ull << TOUCH_3_GPIO_PIN;   /* 设置的引脚的位掩码 */
+    ESP_ERROR_CHECK(gpio_config(&gpio_init_struct));            /* 配置使能 */
+    
+    /* 设置BOOT的中断回调函数 */
+    ESP_ERROR_CHECK(gpio_isr_handler_add(TOUCH_3_GPIO_PIN, exit_TOUCH_3_isr_handler, (void*) this));
+}
+
+void Application::TOUCH_4_init(void)
+{
+    gpio_config_t gpio_init_struct;
+
+    /* 配置BOOT引脚和外部中断 */
+    gpio_init_struct.mode = GPIO_MODE_INPUT;                    /* 选择为输入模式 */
+    gpio_init_struct.pull_up_en = GPIO_PULLUP_ENABLE;           /* 上拉使能 */
+    gpio_init_struct.pull_down_en = GPIO_PULLDOWN_DISABLE;      /* 下拉失能 */
+    gpio_init_struct.intr_type = GPIO_INTR_POSEDGE;             /* 上升沿触发 */
+    gpio_init_struct.pin_bit_mask = 1ull << TOUCH_4_GPIO_PIN;   /* 设置的引脚的位掩码 */
+    ESP_ERROR_CHECK(gpio_config(&gpio_init_struct));            /* 配置使能 */
+    
+    /* 设置BOOT的中断回调函数 */
+    ESP_ERROR_CHECK(gpio_isr_handler_add(TOUCH_4_GPIO_PIN, exit_TOUCH_4_isr_handler, (void*) this));
 }
 
 void Application::InitializeProtocol() {

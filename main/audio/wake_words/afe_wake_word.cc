@@ -84,7 +84,6 @@ bool AfeWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) {
     //     input_format.push_back('R');
     // }
     std::string input_format = "MR";
-    // std::string input_format = "MMR";
 
     afe_config_t* afe_config = afe_config_init(input_format.c_str(), models_, AFE_TYPE_SR, AFE_MODE_HIGH_PERF);
     afe_config->aec_init = codec_->input_reference();
