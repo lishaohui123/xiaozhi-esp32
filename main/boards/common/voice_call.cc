@@ -227,6 +227,69 @@ VoiceCall::~VoiceCall() {
     }
 }
 
+void VoiceCall::stop() {
+
+   // MQTT相关
+    mqtt_.reset();
+
+    if (reconnect_timer_ != nullptr) {
+        esp_timer_stop(reconnect_timer_);
+        esp_timer_delete(reconnect_timer_);
+    }
+        
+    // 停止 UDP 相关任务
+    m_udp_receive_task_running = false;
+    m_udp_send_task_running = false;
+    
+    // 等待任务退出
+    vTaskDelay(pdMS_TO_TICKS(100));
+    
+    // 删除任务
+    if (m_udp_receive_task_handle != nullptr) {
+        if (m_udp_receive_task_static_allocated_) {
+            vTaskDelete(m_udp_receive_task_handle);
+            m_udp_receive_task_static_allocated_ = false;
+        }
+        m_udp_receive_task_handle = nullptr;
+    }
+    
+    if (m_udp_send_task_handle != nullptr) {
+        if (m_udp_send_task_static_allocated_) {
+            vTaskDelete(m_udp_send_task_handle);
+            m_udp_send_task_static_allocated_ = false;
+        }
+        m_udp_send_task_handle = nullptr;
+    }
+#if 0
+    // 🔥 释放任务栈和控制块内存
+    if (m_udp_receive_task_stack_ != nullptr) {
+        heap_caps_free(m_udp_receive_task_stack_);
+        m_udp_receive_task_stack_ = nullptr;
+    }
+    if (m_udp_receive_task_tcb_ != nullptr) {
+        heap_caps_free(m_udp_receive_task_tcb_);
+        m_udp_receive_task_tcb_ = nullptr;
+    }
+    if (m_udp_send_task_stack_ != nullptr) {
+        heap_caps_free(m_udp_send_task_stack_);
+        m_udp_send_task_stack_ = nullptr;
+    }
+    if (m_udp_send_task_tcb_ != nullptr) {
+        heap_caps_free(m_udp_send_task_tcb_);
+        m_udp_send_task_tcb_ = nullptr;
+    }
+    // 🔥 释放电话异步任务的内存
+    if (m_phone_call_stack_ != nullptr) {
+        heap_caps_free(m_phone_call_stack_);
+        m_phone_call_stack_ = nullptr;
+    }
+    if (m_phone_call_tcb_ != nullptr) {
+        heap_caps_free(m_phone_call_tcb_);
+        m_phone_call_tcb_ = nullptr;
+    }
+#endif
+}
+
 VoiceCall* VoiceCall::get_instance() {
     if (s_instance == nullptr) {
         s_instance = new VoiceCall();
@@ -285,6 +348,7 @@ esp_err_t VoiceCall::initMqtt(const std::string& device_id, const std::string& d
     mqtt_->Subscribe("device/" + m_device_info.device_id + "/audio");
     mqtt_->Subscribe("social/" + m_device_info.device_id + "/hd");
     mqtt_->Subscribe("device/" + m_device_info.device_id + "/set");
+    mqtt_->Subscribe("device/" + m_device_info.device_id + "/update");
     
     ESP_LOGI(TAG, "VoiceCall initialized successfully");
     return ESP_OK;
@@ -706,6 +770,14 @@ void VoiceCall::handle_mqtt_message(const char* topic, const char* payload, int 
         return;
     }
 
+    char device_update_topic[64];
+    snprintf(device_update_topic, sizeof(device_update_topic), TOPIC_DEVICE_UPDATE_TEMPLATE, m_device_info.device_id.c_str());
+    if (strcmp(topic, device_update_topic) == 0) {
+        handle_device_update(payload);
+        return;
+    }
+
+
     ESP_LOGW(TAG, "Unhandled MQTT topic: %s", topic);
 }
 
@@ -953,6 +1025,15 @@ void VoiceCall::handle_device_set(const char* payload) {
     }
 
     cJSON_Delete(root);
+}
+
+/*********************************************
+* 进行固件的自动升级
+*********************************************/
+void VoiceCall::handle_device_update(const char* payload) {
+
+    Application::GetInstance().UpdateFirmwareTask();
+
 }
 
 /*********************************************

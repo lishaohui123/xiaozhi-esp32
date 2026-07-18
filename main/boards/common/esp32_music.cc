@@ -333,6 +333,206 @@ Esp32Music::~Esp32Music() {
     ESP_LOGI(TAG, "Music player destroyed successfully");
 }
 
+bool Esp32Music::Stop() {
+    // 清理事件组
+    if (streaming_event_group_) {
+        vEventGroupDelete(streaming_event_group_);
+        streaming_event_group_ = nullptr;
+    }
+
+    if (event_group_) {
+        vEventGroupDelete(event_group_);
+        event_group_ = nullptr;
+    }
+
+    // 1. 先设置停止标志
+    is_downloading_ = false;
+    is_playing_ = false;
+    is_lyric_running_ = false;
+    is_play_audios_status_ = 0;
+    is_state_completed_ = 2; // 标记为强制完成
+    
+    // 2. 通知所有等待的线程
+    {
+        std::lock_guard<std::mutex> lock(buffer_mutex_);
+        buffer_cv_.notify_all();
+    }
+    
+    // 3. 等待一段时间让任务有机会自然退出
+    const int max_wait_ticks = 50; // 等待最多500ms
+    for (int i = 0; i < max_wait_ticks; i++) {
+        // 检查是否还有任务在运行
+        bool tasks_running = false;
+        if (download_task_handle_ != nullptr && 
+            eTaskGetState(download_task_handle_) != eDeleted) {
+            tasks_running = true;
+        }
+        if (play_task_handle_ != nullptr && 
+            eTaskGetState(play_task_handle_) != eDeleted) {
+            tasks_running = true;
+        }
+        if (play_audios_task_handle_ != nullptr && 
+            eTaskGetState(play_audios_task_handle_) != eDeleted) {
+            tasks_running = true;
+        }
+        if (play_audio_task_handle_ != nullptr && 
+            eTaskGetState(play_audio_task_handle_) != eDeleted) {
+            tasks_running = true;
+        }
+        if (lyric_task_handle_ != nullptr && 
+            eTaskGetState(lyric_task_handle_) != eDeleted) {
+            tasks_running = true;
+        }
+        
+        if (!tasks_running) {
+            ESP_LOGI(TAG, "All tasks stopped naturally after %d ms", i * 10);
+            break;
+        }
+        
+        vTaskDelay(pdMS_TO_TICKS(10)); // 每次等待10ms
+    }
+    
+    // 4. 强制删除所有任务（如果还在运行）
+    // 注意：删除顺序应该是从依赖低的到依赖高的
+    
+    // 先删除播放音频任务
+    if (play_audio_task_handle_ != nullptr) {
+        ESP_LOGI(TAG, "Force deleting play_audio task");
+        vTaskDelete(play_audio_task_handle_);
+        play_audio_task_handle_ = nullptr;
+        play_audio_task_static_allocated_ = false;
+    }
+    
+    // 删除播放作品任务
+    if (play_audios_task_handle_ != nullptr) {
+        ESP_LOGI(TAG, "Force deleting play_audios task");
+        vTaskDelete(play_audios_task_handle_);
+        play_audios_task_handle_ = nullptr;
+        play_audios_task_static_allocated_ = false;
+    }
+    
+    // 删除歌词任务
+    if (lyric_task_handle_ != nullptr) {
+        ESP_LOGI(TAG, "Force deleting lyric task");
+        vTaskDelete(lyric_task_handle_);
+        lyric_task_handle_ = nullptr;
+    }
+    
+    // 删除播放任务（依赖于下载任务的数据）
+    if (play_task_handle_ != nullptr) {
+        ESP_LOGI(TAG, "Force deleting play task");
+        vTaskDelete(play_task_handle_);
+        play_task_handle_ = nullptr;
+        play_task_static_allocated_ = false;
+    }
+    
+    // 最后删除下载任务
+    if (download_task_handle_ != nullptr) {
+        ESP_LOGI(TAG, "Force deleting download task");
+        vTaskDelete(download_task_handle_);
+        download_task_handle_ = nullptr;
+        download_task_static_allocated_ = false;
+    }
+    
+    // 5. 清理音频缓冲区（确保在任务删除后进行）
+    ClearAudioBuffer();
+    
+    // 6. 清理MP3解码器
+    CleanupMp3Decoder();
+    
+    // 7. 清理静态分配的任务内存（按照分配的反顺序释放）
+#if 0
+    // 清理播放音频任务内存
+    if (play_audio_task_tcb_ != nullptr) {
+        heap_caps_free(play_audio_task_tcb_);
+        play_audio_task_tcb_ = nullptr;
+        ESP_LOGI(TAG, "Play audio task TCB memory freed");
+    }
+    
+    if (play_audio_task_stack_ != nullptr) {
+        heap_caps_free(play_audio_task_stack_);
+        play_audio_task_stack_ = nullptr;
+        ESP_LOGI(TAG, "Play audio task stack memory freed");
+    }
+    
+    // 清理播放作品任务内存
+    if (play_audios_task_tcb_ != nullptr) {
+        heap_caps_free(play_audios_task_tcb_);
+        play_audios_task_tcb_ = nullptr;
+        ESP_LOGI(TAG, "Play audios task TCB memory freed");
+    }
+    
+    if (play_audios_task_stack_ != nullptr) {
+        heap_caps_free(play_audios_task_stack_);
+        play_audios_task_stack_ = nullptr;
+        ESP_LOGI(TAG, "Play audios task stack memory freed");
+    }
+    
+    // 清理播放任务内存
+    if (play_task_tcb_ != nullptr) {
+        heap_caps_free(play_task_tcb_);
+        play_task_tcb_ = nullptr;
+        ESP_LOGI(TAG, "Play task TCB memory freed");
+    }
+    
+    if (play_task_stack_ != nullptr) {
+        heap_caps_free(play_task_stack_);
+        play_task_stack_ = nullptr;
+        ESP_LOGI(TAG, "Play task stack memory freed");
+    }
+    
+    // 清理下载任务内存
+    if (download_task_tcb_ != nullptr) {
+        heap_caps_free(download_task_tcb_);
+        download_task_tcb_ = nullptr;
+        ESP_LOGI(TAG, "Download task TCB memory freed");
+    }
+    
+    if (download_task_stack_ != nullptr) {
+        heap_caps_free(download_task_stack_);
+        download_task_stack_ = nullptr;
+        ESP_LOGI(TAG, "Download task stack memory freed");
+    }
+#endif  
+    // 8. 清理条件变量和互斥锁（虽然不是必需的，但可以确保状态正确）
+    // 注意：在C++中，std::condition_variable和std::mutex的析构函数会自动清理
+    // 但我们需要确保没有线程在等待
+    {
+        std::lock_guard<std::mutex> lock(buffer_mutex_);
+        buffer_cv_.notify_all();
+    }
+    
+    // 9. 清理歌词相关资源
+    {
+        std::lock_guard<std::mutex> lock(lyrics_mutex_);
+        lyrics_.clear();
+        current_lyric_index_ = -1;
+    }
+    
+    // 10. 重置所有原子变量
+    current_lyric_index_ = -1;
+    is_state_completed_ = 0;
+    is_play_audios_status_ = 0;
+    current_play_time_ms_ = 0;
+    last_frame_time_ms_ = 0;
+    total_frames_decoded_ = 0;
+    
+    // 11. 清理字符串成员
+    last_downloaded_data_.clear();
+    work_name_.clear();
+    current_music_url_.clear();
+    current_song_name_.clear();
+    current_lyric_url_.clear();
+    
+    // 12. 重置布尔标志
+    song_name_displayed_ = false;
+    mp3_decoder_initialized_ = false;
+    is_downloaded = false;
+    is_played = false;
+
+    return true;
+}
+
 std::string Esp32Music::ParseWorkId() {
     std::string work_id_str;
     if (!last_downloaded_data_.empty()) {
@@ -987,7 +1187,7 @@ bool Esp32Music::Download(const std::string& work_name, bool restart) {
                         } 
                         play_audios_task_handle_ = nullptr;
                     }
-#if 0
+#if 1
                     // 改为静态分配内存
                     if (play_audios_task_stack_ == nullptr) {
                         play_audios_task_stack_ = (StackType_t*)heap_caps_malloc(3072 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
@@ -999,10 +1199,10 @@ bool Esp32Music::Download(const std::string& work_name, bool restart) {
                         assert(play_audios_task_tcb_ != nullptr);
                     }
 #endif
-#if 1
+#if 0
                     xTaskCreatePinnedToCore(PlayAudiosTask, "play_audios", 3072, params, 2, &play_audios_task_handle_, 1);
 #endif
-#if 0
+#if 1
                     // 创建播放音频任务
                     play_audios_task_handle_ = xTaskCreateStatic(
                         PlayAudiosTask,
@@ -1197,7 +1397,7 @@ bool Esp32Music::Play2(const std::string& music_url) {
         } 
         play_audio_task_handle_ = nullptr;
     }
-#if 0
+#if 1
     // 分配PlayAudioTask的静态任务内存
     if (play_audio_task_stack_ == nullptr) {
         play_audio_task_stack_ = (StackType_t*)heap_caps_malloc(3072 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
@@ -1211,11 +1411,11 @@ bool Esp32Music::Play2(const std::string& music_url) {
         ESP_LOGI(TAG, "Allocated play audio task TCB: %p", play_audio_task_tcb_);
     }
 #endif
-#if 1
+#if 0
 
     xTaskCreatePinnedToCore(PlayAudioTask, "play_audio", 3072, param, 2, &play_audio_task_handle_, 1);
 #endif
-#if 0
+#if 1
     // 创建静态播放音频任务
     play_audio_task_handle_ = xTaskCreateStatic(
         PlayAudioTask,
@@ -1270,10 +1470,6 @@ void Esp32Music::PlayAudioImpl(const std::string& music_url) {
 }
 
 bool Esp32Music::Play() {
-    return true;
-}
-
-bool Esp32Music::Stop() {
     return true;
 }
 
@@ -1390,7 +1586,7 @@ bool Esp32Music::StartStreaming(const std::string& music_url) {
         }
         download_task_handle_ = nullptr;
     }
-#if 0
+#if 1
     if (download_task_stack_ == nullptr) {
         download_task_stack_ = (StackType_t*)heap_caps_malloc(DOWNLOAD_TASK_STACK_SIZE * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
         assert(download_task_stack_ != nullptr);
@@ -1402,10 +1598,10 @@ bool Esp32Music::StartStreaming(const std::string& music_url) {
     }
 #endif
     DownloadTaskParams* download_params = new DownloadTaskParams{this, music_url};
-#if 1
+#if 0
     xTaskCreatePinnedToCore(DownloadAudioStreamTask, "audio_download", 1024 * 12, download_params, 2, &download_task_handle_, 1);
 #endif
-#if 0
+#if 1
     download_task_handle_ = xTaskCreateStatic(
         DownloadAudioStreamTask,
         "audio_download",
@@ -1433,7 +1629,7 @@ bool Esp32Music::StartStreaming(const std::string& music_url) {
         }
         play_task_handle_ = nullptr;
     }
-#if 0
+#if 1
     if (play_task_stack_ == nullptr) {
         play_task_stack_ = (StackType_t*)heap_caps_malloc(PLAY_TASK_STACK_SIZE * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
         assert(play_task_stack_ != nullptr);
@@ -1444,10 +1640,10 @@ bool Esp32Music::StartStreaming(const std::string& music_url) {
         assert(play_task_tcb_ != nullptr);
     }
 #endif
-#if 1
-    xTaskCreatePinnedToCore(PlayAudioStreamTask, "audio_play", 1024 * 24, this, 2, &play_task_handle_, 1);
-#endif
 #if 0
+    xTaskCreatePinnedToCore(PlayAudioStreamTask, "audio_play", 1024 * 12, this, 2, &play_task_handle_, 1);
+#endif
+#if 1
     play_task_handle_ = xTaskCreateStatic(
         PlayAudioStreamTask,
         "audio_play",

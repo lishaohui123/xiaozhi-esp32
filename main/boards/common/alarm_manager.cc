@@ -107,6 +107,29 @@ AlarmManager::~AlarmManager() {
     }
 }
 
+void AlarmManager::stop() {
+    alarm_trigger_task_running_ = false;
+    if (m_alarm_trigger_task_handle != nullptr) {
+        if (alarm_trigger_task_static_allocated_) {
+            vTaskDelete(m_alarm_trigger_task_handle);
+            alarm_trigger_task_static_allocated_ = false;
+        }
+        m_alarm_trigger_task_handle = nullptr;
+    }
+
+    if (alarm_trigger_task_stack_ != nullptr) {
+        heap_caps_free(alarm_trigger_task_stack_);
+        alarm_trigger_task_stack_ = nullptr;
+        ESP_LOGI(TAG, "Alarm trigger task stack memory freed");
+    }
+    
+    if (alarm_trigger_task_tcb_ != nullptr) {
+        heap_caps_free(alarm_trigger_task_tcb_);
+        alarm_trigger_task_tcb_ = nullptr;
+        ESP_LOGI(TAG, "Alarm trigger task TCB memory freed");
+    }
+}
+
 /******************************
  * http客户端的初始化
  * 加载所有生效的闹钟

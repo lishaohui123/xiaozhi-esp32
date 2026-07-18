@@ -130,7 +130,12 @@ public:
     AecMode GetAecMode() const { return aec_mode_; }
     void PlaySound(const std::string_view& sound);
     AudioService& GetAudioService() { return audio_service_; }
-    
+
+    void UpdateFirmwareTask();
+    void UpdateFirmware(void *arg);
+
+    TaskHandle_t update_firmware_task_handle_ = nullptr;
+
     /**
      * Reset protocol resources (thread-safe)
      * Can be called from any task to release resources allocated after network connected

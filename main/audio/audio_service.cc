@@ -204,6 +204,7 @@ void AudioService::Start() {
         [](void* arg) {
             AudioService* audio_service = (AudioService*)arg;
             audio_service->AudioInputTask();
+            while (true) vTaskDelay(portMAX_DELAY);
         },
         "audio_input",
         audio_input_stack_size,
@@ -220,6 +221,7 @@ void AudioService::Start() {
         [](void* arg) {
             AudioService* audio_service = (AudioService*)arg;
             audio_service->AudioOutputTask();
+            while (true) vTaskDelay(portMAX_DELAY);
         },
         "audio_output",
         audio_output_stack_size,
@@ -236,6 +238,7 @@ void AudioService::Start() {
         [](void* arg) {
             AudioService* audio_service = (AudioService*)arg;
             audio_service->OpusCodecTask();
+            while (true) vTaskDelay(portMAX_DELAY);
         },
         "opus_codec",
         opus_codec_stack_size,
@@ -251,6 +254,7 @@ void AudioService::Start() {
 }
 
 void AudioService::Stop() {
+    ESP_LOGI(TAG, "Audio service stopped start");
     esp_timer_stop(audio_power_timer_);
     service_stopped_ = true;
     xEventGroupSetBits(event_group_, AS_EVENT_AUDIO_TESTING_RUNNING |
@@ -265,7 +269,7 @@ void AudioService::Stop() {
     audio_queue_cv_.notify_all();
 
     // 等待任务退出（给予一定的延迟）
-    vTaskDelay(pdMS_TO_TICKS(100));
+    vTaskDelay(pdMS_TO_TICKS(10000));
     
     // 删除任务
     if (audio_input_task_handle_ != nullptr) {

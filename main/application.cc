@@ -388,7 +388,7 @@ void Application::HandleActivationDoneEvent() {
     audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
 
     // Release OTA object after activation is complete
-    ota_.reset();
+    // ota_.reset();        // 后续的固件升级需要用到这个句柄，这里不能释放
     auto& board = Board::GetInstance();
     board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
 }
@@ -541,7 +541,7 @@ void Application::CheckNewVersion() {
             // ShowActivationCode(ota_->GetActivationCode(), ota_->GetActivationMessage());
 
             if (blue_device == "")  {
-                std::string s = "小主人，请先双击开关键，进行蓝牙配网";
+                std::string s = "小主人，请先长按开关键四到五秒，然后先双击开关键，进行蓝牙配网";
                 auto& alarm_manager = AlarmManager::GetInstance();
                 alarm_manager.PlayTtsAudioStreamVoice(s, 3);
 
@@ -563,6 +563,58 @@ void Application::CheckNewVersion() {
             if (GetDeviceState() == kDeviceStateIdle) {
                 break;
             }
+        }
+    }
+}
+
+/************************
+ * 自动进行固件的升级
+ ************************/
+void Application::UpdateFirmwareTask() {
+    if (update_firmware_task_handle_ != nullptr) {
+        ESP_LOGW(TAG, "UpdateFirmwareTask task already running");
+        return;
+    }
+
+    xTaskCreate([](void* arg) {
+        Application* app = static_cast<Application*>(arg);
+        app->UpdateFirmware(arg);
+        app->update_firmware_task_handle_ = nullptr;
+
+        vTaskDelete(NULL);
+    }, "UpdateFirmwareTask", 1024 * 48, this, 2, &update_firmware_task_handle_);
+    assert(update_firmware_task_handle_ != nullptr);
+}
+
+void Application::UpdateFirmware(void *arg) {
+    // 正常对话时、电话时、播放故事时，都不触发的
+    if ((kDeviceStateIdle == GetDeviceState()) && (Application::GetInstance().GetAudioService().is_voice_out_ == false)) {
+        Application* application = static_cast<Application*>(arg);
+
+        application->ota_->CheckVersion();
+
+        if (application->ota_->HasNewVersion()) {
+            ESP_LOGI(TAG, "正在进行升级。%s %s", application->ota_->GetFirmwareUrl().c_str(),application->ota_->GetFirmwareVersion().c_str());
+    #if 1
+            std::string s = "小主人，正在进行升级，请保持设备处于开机状态。";
+            auto& alarm_manager = AlarmManager::GetInstance();
+            alarm_manager.PlayTtsAudioStreamVoice(s, 1);
+    #endif
+            if (UpgradeFirmware(application->ota_->GetFirmwareUrl(), application->ota_->GetFirmwareVersion())) {
+    #if 1
+                std::string s = "小主人，已经升级完成了，请长按开关键重新起动设备。";
+                auto& alarm_manager = AlarmManager::GetInstance();
+                alarm_manager.PlayTtsAudioStreamVoice(s, 1);
+    #endif
+                return; // This line will never be reached after reboot
+            }
+        }
+        else {
+            std::string s = "小主人，目前设备已经是最新版本了。";
+            auto& alarm_manager = AlarmManager::GetInstance();
+            alarm_manager.PlayTtsAudioStreamVoice(s, 1);
+
+            ESP_LOGI(TAG, "目前固件已经是最新版本了");
         }
     }
 }
@@ -617,7 +669,7 @@ void Application::InitializeMqtt() {
     voiceCall->initUdp();
     vTaskDelay(pdMS_TO_TICKS(500));
 
-    ESP_LOGI(TAG, "初始化音视频功能成功");
+    ESP_LOGI(TAG, "初始化音视频功能成功 OK 啦 OK 啦 OK 啦了");
 }
 
 void Application::SW_Vibrating_init(void)
@@ -1288,6 +1340,10 @@ void Application::Reboot() {
     }
     protocol_.reset();
     audio_service_.Stop();
+
+    VoiceCall::get_instance()->stop();
+    Board::GetInstance().GetMusic()->Stop();
+    AlarmManager::GetInstance().stop();
 
     vTaskDelay(pdMS_TO_TICKS(1000));
     esp_restart();

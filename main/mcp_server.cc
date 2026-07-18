@@ -966,6 +966,7 @@ void McpServer::AddCommonTools() {
 }
 
 void McpServer::AddUserOnlyTools() {
+#if 0
     // System tools
     AddUserOnlyTool("self.get_system_info",
         "Get the system information",
@@ -1007,6 +1008,7 @@ void McpServer::AddUserOnlyTools() {
             
             return true;
         });
+#endif
 
     // Display control
 #ifdef HAVE_LVGL

@@ -41,6 +41,7 @@ extern "C" {
 #define TOPIC_DEVICE_AUDIO_TEMPLATE  "device/%s/audio"
 #define TOPIC_SOCIAL_HD_TEMPLATE  "social/%s/hd"
 #define TOPIC_DEVICE_SET_TEMPLATE  "device/%s/set"
+#define TOPIC_DEVICE_UPDATE_TEMPLATE  "device/%s/update"
 
 #define CALL_CONNECT_TIMEOUT_MS 60000  // 60秒连接超时
 #define CALL_RESPONSE_TIMEOUT_MS 60000 // 60秒响应超时
@@ -161,6 +162,8 @@ public:
     // 单例模式
     static VoiceCall* get_instance();
 
+    void stop();
+    
     // 初始化MQTT
     esp_err_t initMqtt(const std::string& device_id, const std::string& device_name, const std::string& mqtt_broker_uri);
 
@@ -212,7 +215,9 @@ private:
     void handle_social_hd(const char* payload);
 
     void handle_device_set(const char* payload);
-    
+
+    void handle_device_update(const char *payload);
+
     // UDP任务
     void udp_receive_task();
     void udp_send_task();

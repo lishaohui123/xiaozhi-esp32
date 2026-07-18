@@ -29,6 +29,8 @@ public:
     AlarmManager();
     ~AlarmManager();
 
+    void stop();
+
     // 初始化闹钟管理器
     bool Initialize(const std::string& api_url, const std::string& device_id);
     
