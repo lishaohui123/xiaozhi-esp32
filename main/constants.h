@@ -20,6 +20,10 @@
 #define CONFIG_OTA_WS "ws://api.tenclass.net/xiaozhi/v1/"
 
 #define ACCESS_TOKEN "sk-293ca4e64d3f4aa39010864ce95dfdbe"
+
+
+#define PRODUCT "baobaolong"
+#define SUB_PRODUCT "yanyan"
 #endif
 
 
@@ -38,6 +42,10 @@
 #define CONFIG_OTA_WS "ws://api.tenclass.net/xiaozhi/v1/"
 
 #define ACCESS_TOKEN "sk-293ca4e64d3f4aa39010864ce95dfdbe"
+
+
+#define PRODUCT "baobaolong"
+#define SUB_PRODUCT "yanyan"
 #endif
 
 extern std::string blue_device;

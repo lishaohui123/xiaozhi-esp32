@@ -484,9 +484,9 @@ esp_err_t Ota::SendActivationCode(const std::string& deviceId, const std::string
     // std::string url = GetCheckVersionUrl();
     std::string url = OTA_URI;
     if (url.back() != '/') {
-        url += "/device/bind?deviceId=" + deviceId + "&blueYaId=" + blue_device + "&boardId=" + board_id;
+        url += "/device/bind?deviceId=" + deviceId + "&blueYaId=" + blue_device + "&boardId=" + board_id + "&product=" + PRODUCT + + "&subProduct=" + SUB_PRODUCT;
     } else {
-        url += "device/bind?deviceId=" + deviceId + "&blueYaId=" + blue_device + "&boardId=" + board_id;
+        url += "device/bind?deviceId=" + deviceId + "&blueYaId=" + blue_device + "&boardId=" + board_id + "&product=" + PRODUCT + + "&subProduct=" + SUB_PRODUCT;
     }
 
     auto http = std::unique_ptr<Http>(SetupHttp());

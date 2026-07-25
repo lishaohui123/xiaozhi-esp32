@@ -113,6 +113,7 @@ public:
     virtual bool PlayVoice(const std::string& music_url, int repeat) override;
     virtual bool PlayHdAudio(const std::string &audio_url)override;
     virtual bool PlayTouchAudio(const std::string &touch_url)override;
+    virtual bool PlayRaisingSimAudio(const std::string &raisingsim_url)override;
     virtual bool Play2(const std::string &music_url) override;
     virtual bool Stop() override;
     virtual std::string GetDownloadResult() override;

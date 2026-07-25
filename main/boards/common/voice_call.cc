@@ -349,6 +349,7 @@ esp_err_t VoiceCall::initMqtt(const std::string& device_id, const std::string& d
     mqtt_->Subscribe("social/" + m_device_info.device_id + "/hd");
     mqtt_->Subscribe("device/" + m_device_info.device_id + "/set");
     mqtt_->Subscribe("device/" + m_device_info.device_id + "/update");
+    mqtt_->Subscribe("device/" + m_device_info.device_id + "/RaisingSim");
     
     ESP_LOGI(TAG, "VoiceCall initialized successfully");
     return ESP_OK;
@@ -777,6 +778,12 @@ void VoiceCall::handle_mqtt_message(const char* topic, const char* payload, int 
         return;
     }
 
+    char device_raisingsim_topic[64];   
+    snprintf(device_raisingsim_topic, sizeof(device_raisingsim_topic), TOPIC_DEVICE_RAISINGSIM_TEMPLATE, m_device_info.device_id.c_str());
+    if (strcmp(topic, device_raisingsim_topic) == 0) {
+        handle_device_raisingsim(payload);
+        return;
+    }
 
     ESP_LOGW(TAG, "Unhandled MQTT topic: %s", topic);
 }
@@ -975,7 +982,7 @@ void VoiceCall::handle_device_audio(const char* payload) {
 
     cJSON* root = cJSON_Parse(payload);
     if (!root) {
-        ESP_LOGE(TAG, "Failed to parse call end payload");
+        ESP_LOGE(TAG, "Failed to parse device_audio payload");
         return;
     }
 
@@ -1034,6 +1041,34 @@ void VoiceCall::handle_device_update(const char* payload) {
 
     Application::GetInstance().UpdateFirmwareTask();
 
+}
+
+/*********************************************
+* 喂养小龙时的语音互动
+*********************************************/
+void VoiceCall::handle_device_raisingsim(const char* payload) {
+    if (!payload) {
+        ESP_LOGE(TAG, "Invalid call end payload");
+        return;
+    }
+
+    ESP_LOGI(TAG, "Handling play audio: %s", payload);
+
+    cJSON* root = cJSON_Parse(payload);
+    if (!root) {
+        ESP_LOGE(TAG, "Failed to parse device_raisingsim payload");
+        return;
+    }
+
+    std::string hd_name = std::string(cJSON_GetObjectItem(root, "hdName")->valuestring);
+    std::string hd_cz = std::string(cJSON_GetObjectItem(root, "hdCz")->valuestring);
+    cJSON_Delete(root);
+
+    // 正常对话时、电话时、播放故事时，都不触发的
+    if ((kDeviceStateIdle == Application::GetInstance().GetDeviceState()) && (Application::GetInstance().GetAudioService().is_voice_out_ == false)) {
+        std::string raisingsim_url = std::format("{}RaisingSim?deviceId={}&voiceType={}&hdName={}&hdCz={}", OTA_URI, GloableVar::device_id, urlEncode(GloableVar::voice_type), urlEncode(hd_name), urlEncode(hd_cz));
+        Board::GetInstance().GetMusic()->PlayRaisingSimAudio(raisingsim_url);
+    }
 }
 
 /*********************************************

@@ -6,7 +6,7 @@ cmake_minimum_required(VERSION 3.16)
 
 # 原始的小智开源的固件版本是2.1.0
 # set(PROJECT_VER "2.1.0")
-set(PROJECT_VER "2.1.7")
+set(PROJECT_VER "1.0.0")
 
 # Add this line to disable the specific warning
 add_compile_options(-Wno-missing-field-initializers)
