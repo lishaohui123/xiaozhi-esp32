@@ -1110,10 +1110,10 @@ void VoiceCall::handle_social_hd(const char* payload) {
         }
 
         if (hd_type == "audio") {
-            std::string s = "小主人，你来自" + city + "的好朋友" + friend_name + "给你留言了！留言的内容如下。";
+            std::string s = "小主人，你来自" + city + "的好朋友" + friend_name + "给你留言了！快去给他接听吧。";
             auto& alarm_manager = AlarmManager::GetInstance();
             alarm_manager.PlayTtsAudioStreamVoice(s, 1);
-
+#if 0   // 改为不在这里直接播放，而是在小程序播放
             vTaskDelay(pdMS_TO_TICKS(3000));
 
             long recordId = (long)(cJSON_GetObjectItem(root, "id")->valueint);
@@ -1121,6 +1121,7 @@ void VoiceCall::handle_social_hd(const char* payload) {
 
             auto music = Board::GetInstance().GetMusic();
             music->PlayHdAudio(audio_url);
+#endif
         }
     }
 
