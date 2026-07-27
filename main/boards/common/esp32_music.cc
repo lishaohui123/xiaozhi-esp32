@@ -2122,7 +2122,7 @@ void Esp32Music::DownloadAudioStreamImpl(const std::string& music_url) {
     ESP_LOGI(TAG, "开始时间: %lld", (long long)start_time.time_since_epoch().count());
 
     // 限制下载线程的流量
-    const size_t MAX_BYTES_PER_SECOND = 20 * 1024;
+    const size_t MAX_BYTES_PER_SECOND = 50 * 1024;
     size_t bytes_this_second = 0;
     auto second_start = std::chrono::steady_clock::now();
 
