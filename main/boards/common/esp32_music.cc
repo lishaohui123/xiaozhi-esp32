@@ -1200,7 +1200,7 @@ bool Esp32Music::Download(const std::string& work_name, bool restart) {
                     }
 #endif
 #if 0
-                    xTaskCreatePinnedToCore(PlayAudiosTask, "play_audios", 3072, params, 2, &play_audios_task_handle_, 1);
+                    xTaskCreatePinnedToCore(PlayAudiosTask, "play_audios", 3072, params, 1, &play_audios_task_handle_, 1);
 #endif
 #if 1
                     // 创建播放音频任务
@@ -1209,7 +1209,7 @@ bool Esp32Music::Download(const std::string& work_name, bool restart) {
                         "play_audios",
                         3072,
                         params,
-                        2,
+                        1,
                         play_audios_task_stack_,
                         play_audios_task_tcb_
                     );
@@ -1420,7 +1420,7 @@ bool Esp32Music::Play2(const std::string& music_url) {
 #endif
 #if 0
 
-    xTaskCreatePinnedToCore(PlayAudioTask, "play_audio", 3072, param, 2, &play_audio_task_handle_, 1);
+    xTaskCreatePinnedToCore(PlayAudioTask, "play_audio", 3072, param, 1, &play_audio_task_handle_, 1);
 #endif
 #if 1
     // 创建静态播放音频任务
@@ -1429,7 +1429,7 @@ bool Esp32Music::Play2(const std::string& music_url) {
         "play_audio",
         3072,
         param,
-        2,
+        1,
         play_audio_task_stack_,
         play_audio_task_tcb_
     );
@@ -1606,7 +1606,7 @@ bool Esp32Music::StartStreaming(const std::string& music_url) {
 #endif
     DownloadTaskParams* download_params = new DownloadTaskParams{this, music_url};
 #if 0
-    xTaskCreatePinnedToCore(DownloadAudioStreamTask, "audio_download", 1024 * 12, download_params, 2, &download_task_handle_, 1);
+    xTaskCreatePinnedToCore(DownloadAudioStreamTask, "audio_download", 1024 * 12, download_params, 1, &download_task_handle_, 1);
 #endif
 #if 1
     download_task_handle_ = xTaskCreateStatic(
@@ -1614,7 +1614,7 @@ bool Esp32Music::StartStreaming(const std::string& music_url) {
         "audio_download",
         DOWNLOAD_TASK_STACK_SIZE,
         download_params,
-        2,
+        1,
         download_task_stack_,
         download_task_tcb_
     );
@@ -1648,7 +1648,7 @@ bool Esp32Music::StartStreaming(const std::string& music_url) {
     }
 #endif
 #if 0
-    xTaskCreatePinnedToCore(PlayAudioStreamTask, "audio_play", 1024 * 12, this, 2, &play_task_handle_, 1);
+    xTaskCreatePinnedToCore(PlayAudioStreamTask, "audio_play", 1024 * 12, this, 1, &play_task_handle_, 1);
 #endif
 #if 1
     play_task_handle_ = xTaskCreateStatic(
@@ -1656,7 +1656,7 @@ bool Esp32Music::StartStreaming(const std::string& music_url) {
         "audio_play",
         PLAY_TASK_STACK_SIZE,
         this,
-        2,
+        1,
         play_task_stack_,
         play_task_tcb_ 
     );
@@ -2061,7 +2061,7 @@ void Esp32Music::FreeAudioPacket(AudioStreamPacket* packet) {
 * 具体执行下载音乐流的函数，在指定的URL进行下载
 ****************************************/
 void Esp32Music::DownloadAudioStreamImpl(const std::string& music_url) {
-    ESP_LOGI(TAG, "开始音频流下载 - 添加统计信息");
+    ESP_LOGI(TAG, "开始音频流下载 - 添加统计信息，music_url=%s", music_url.c_str());
   
     // 验证URL有效性
     if (music_url.empty() || music_url.find("http") != 0) {
@@ -2122,7 +2122,7 @@ void Esp32Music::DownloadAudioStreamImpl(const std::string& music_url) {
     ESP_LOGI(TAG, "开始时间: %lld", (long long)start_time.time_since_epoch().count());
 
     // 限制下载线程的流量
-    const size_t MAX_BYTES_PER_SECOND = 10 * 1024;  // 10 KB/s
+    const size_t MAX_BYTES_PER_SECOND = 20 * 1024;
     size_t bytes_this_second = 0;
     auto second_start = std::chrono::steady_clock::now();
 
