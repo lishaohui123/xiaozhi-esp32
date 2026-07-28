@@ -12,6 +12,7 @@
 #include <map>
 #include <memory>
 
+#include <freertos/queue.h>
 #include "protocol.h"
 #include "ota.h"
 #include "audio_service.h"
@@ -56,6 +57,8 @@ enum AecMode {
     kAecOnDeviceSide,
     kAecOnServerSide,
 };
+
+enum class TouchRegion : uint8_t { HEAD, HAND, CHEST, TAIL };
 
 class Application {
 public:
@@ -145,7 +148,7 @@ public:
 
     void SetModeRealtime();
 
-    std::deque<std::string> touch_debounce_task_queue_;
+    QueueHandle_t touch_debounce_queue_;
     std::map<std::string, gpio_num_t> touch_pin_map_;
 
     std::deque<std::string> touch_task_queue_;

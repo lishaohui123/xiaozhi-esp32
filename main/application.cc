@@ -80,7 +80,7 @@ Application::Application() {
     };
     esp_timer_create(&clock_timer_args, &clock_timer_handle_);
 
-    touch_debounce_task_queue_.clear();
+    touch_debounce_queue_ = xQueueCreate(50, sizeof(TouchRegion));
     touch_task_queue_.clear();
 
     // 触摸传感器的震动定时器
@@ -103,6 +103,9 @@ Application::~Application() {
     if (touch_timer_handle_ != nullptr) {
         esp_timer_stop(touch_timer_handle_);
         esp_timer_delete(touch_timer_handle_);
+    }
+    if (touch_debounce_queue_) {
+        vQueueDelete(touch_debounce_queue_);
     }
     vEventGroupDelete(event_group_);
 }
@@ -709,15 +712,21 @@ void Application::TouchDebounceTask(void *arg) {
     Application* application = static_cast<Application*>(arg);
 
     std::map<std::string, int64_t> last_touch_map;
-    const int64_t repeat_debounce_ms = 9000;
-    const int level_confirm_ms = 500;
+    const int64_t repeat_debounce_ms = 8000;
+    const int level_confirm_ms = 300;
     std::string region;
     while (true) {
-        if (!application->touch_debounce_task_queue_.empty()) {
-            region = application->touch_debounce_task_queue_.front();
-            application->touch_debounce_task_queue_.pop_front();
+        TouchRegion touch_region;
+        if (xQueueReceive(application->touch_debounce_queue_, &touch_region, 0) == pdTRUE) {
+            switch (touch_region) {
+                case TouchRegion::HEAD:  region = "head";  break;
+                case TouchRegion::HAND:  region = "hand";  break;
+                case TouchRegion::CHEST: region = "chest"; break;
+                case TouchRegion::TAIL:  region = "tail";  break;
+                default: region = "head";  break;
+            }
 
-            // 第一级：等待 500ms 让电平稳定
+            // 第一级：等待 300ms 让电平稳定
             vTaskDelay(pdMS_TO_TICKS(level_confirm_ms));
 
             // 第二级：确认引脚仍然为高电平
@@ -780,8 +789,6 @@ void Application::TouchTask(void *arg) {
             vTaskDelay(pdMS_TO_TICKS(20));
         }
     }
-
-
 }
 
 /*******************
@@ -792,22 +799,42 @@ void Application::TouchTask(void *arg) {
 // 对应头部
 static void IRAM_ATTR exit_TOUCH_1_isr_handler(void *arg)
 {
-        static_cast<Application*>(arg)->touch_debounce_task_queue_.push_back("head");
+    TouchRegion region = TouchRegion::HEAD;
+    BaseType_t higher_priority_task_woken = pdFALSE;
+    xQueueSendFromISR(static_cast<Application*>(arg)->touch_debounce_queue_, &region, &higher_priority_task_woken);
+    if (higher_priority_task_woken) {
+        portYIELD_FROM_ISR();
+    }
 }
 
 static void IRAM_ATTR exit_TOUCH_2_isr_handler(void *arg)
 {
-    static_cast<Application*>(arg)->touch_debounce_task_queue_.push_back("hand");
+    TouchRegion region = TouchRegion::HAND;
+    BaseType_t higher_priority_task_woken = pdFALSE;
+    xQueueSendFromISR(static_cast<Application*>(arg)->touch_debounce_queue_, &region, &higher_priority_task_woken);
+    if (higher_priority_task_woken) {
+        portYIELD_FROM_ISR();
+    }
 }
 
 static void IRAM_ATTR exit_TOUCH_3_isr_handler(void *arg)
 {
-    static_cast<Application*>(arg)->touch_debounce_task_queue_.push_back("chest");
+    TouchRegion region = TouchRegion::CHEST;
+    BaseType_t higher_priority_task_woken = pdFALSE;
+    xQueueSendFromISR(static_cast<Application*>(arg)->touch_debounce_queue_, &region, &higher_priority_task_woken);
+    if (higher_priority_task_woken) {
+        portYIELD_FROM_ISR();
+    }
 }
 
 static void IRAM_ATTR exit_TOUCH_4_isr_handler(void *arg)
 {
-    static_cast<Application*>(arg)->touch_debounce_task_queue_.push_back("tail");
+    TouchRegion region = TouchRegion::TAIL;
+    BaseType_t higher_priority_task_woken = pdFALSE;
+    xQueueSendFromISR(static_cast<Application*>(arg)->touch_debounce_queue_, &region, &higher_priority_task_woken);
+    if (higher_priority_task_woken) {
+        portYIELD_FROM_ISR();
+    }
 }
 
 /*****************
