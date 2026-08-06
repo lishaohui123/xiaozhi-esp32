@@ -339,18 +339,24 @@ esp_err_t VoiceCall::initMqtt(const std::string& device_id, const std::string& d
     }
 
     // 订阅主题
-    mqtt_->Subscribe("device/" + m_device_info.device_id + "/call/request");
-    mqtt_->Subscribe("device/" + m_device_info.device_id + "/call/accept");
-    mqtt_->Subscribe("device/" + m_device_info.device_id + "/call/end");
-    mqtt_->Subscribe("device/" + m_device_info.device_id + "/call/response");
-    mqtt_->Subscribe("device/" + m_device_info.device_id + "/alarm");
-    mqtt_->Subscribe("device/" + m_device_info.device_id + "/works");
-    mqtt_->Subscribe("device/" + m_device_info.device_id + "/audio");
-    mqtt_->Subscribe("social/" + m_device_info.device_id + "/hd");
-    mqtt_->Subscribe("device/" + m_device_info.device_id + "/set");
-    mqtt_->Subscribe("device/" + m_device_info.device_id + "/update");
-    mqtt_->Subscribe("device/" + m_device_info.device_id + "/RaisingSim");
-    
+    const std::vector<std::string> subscribe_topics = {
+        "device/" + m_device_info.device_id + "/call/request",
+        "device/" + m_device_info.device_id + "/call/accept",
+        "device/" + m_device_info.device_id + "/call/end",
+        "device/" + m_device_info.device_id + "/call/response",
+        "device/" + m_device_info.device_id + "/alarm",
+        "device/" + m_device_info.device_id + "/works",
+        "device/" + m_device_info.device_id + "/audio",
+        "social/" + m_device_info.device_id + "/hd",
+        "device/" + m_device_info.device_id + "/set",
+        "device/" + m_device_info.device_id + "/update",
+        "device/" + m_device_info.device_id + "/RaisingSim",
+    };
+    for (const auto& topic : subscribe_topics) {
+        mqtt_->Subscribe(topic);
+        ESP_LOGI(TAG, "MQTT subscribed: %s", topic.c_str());
+    }
+
     ESP_LOGI(TAG, "VoiceCall initialized successfully");
     return ESP_OK;
 }
