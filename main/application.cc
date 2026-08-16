@@ -544,7 +544,7 @@ void Application::CheckNewVersion() {
             // ShowActivationCode(ota_->GetActivationCode(), ota_->GetActivationMessage());
 
             if (blue_device == "")  {
-                std::string s = "小主人，请先长按开关键四到五秒，然后先双击开关键，进行蓝牙配网";
+                std::string s = "小主人，请先长按开关键四到五秒来开机，然后先双击开关键，进行蓝牙配网";
                 auto& alarm_manager = AlarmManager::GetInstance();
                 alarm_manager.PlayTtsAudioStreamVoice(s, 3);
 

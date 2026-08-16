@@ -2075,32 +2075,32 @@ void Esp32Music::DownloadAudioStreamImpl(const std::string& music_url) {
     std::lock_guard<std::mutex> lock(stats_mutex_);
     total_downloaded_in_mp3_bytes = 0;  // 重置全局下载统计
     
-    // 清理之前的HTTP连接
+    // 创建 HTTP 客户端（只创建一次，重试时复用）
     int connection_id = esp_random() % 10000;
     auto http = Board::GetInstance().GetNetwork()->CreateHttp(connection_id);
-
     std::shared_ptr<Http> shared_http = std::move(http);
     http_client_ = std::static_pointer_cast<HttpClient>(shared_http);
-    http_client_->SetKeepAlive(true); // 启用 Keep-Alive
+    http_client_->SetKeepAlive(true);
 
-    // 设置请求头
-    http_client_->SetHeader("Accept", "*/*");
+    // 连接辅助函数：offset > 0 时带 Range 请求头续传
+    auto connect_http = [&](size_t offset) -> int {
+        http_client_->Close();
+        if (offset > 0) {
+            http_client_->SetHeader("Range", "bytes=" + std::to_string(offset) + "-");
+        }
+        if (!http_client_->Open("GET", music_url)) {
+            return -1;
+        }
+        return http_client_->GetStatusCode();
+    };
 
-   if (!http_client_->Open("GET", music_url)) {
-       ESP_LOGE(TAG, "无法连接到音乐流URL: %s", music_url.c_str());
-       http_client_->Close();
-       http_client_.reset();
-       is_downloading_ = false;
-       return;
-    }
-
-   int status_code = http_client_->GetStatusCode();
-   if (status_code != 200 && status_code != 206) {  // 206 for partial content
-       ESP_LOGE(TAG, "HTTP GET失败，状态码: %d", status_code);
-       http_client_->Close();
-       http_client_.reset();
-       is_downloading_ = false;
-       return;
+    int status_code = connect_http(0);
+    if (status_code != 200 && status_code != 206) {
+        ESP_LOGE(TAG, "HTTP GET失败，状态码: %d", status_code);
+        http_client_->Close();
+        http_client_.reset();
+        is_downloading_ = false;
+        return;
     }
 
     ESP_LOGI(TAG, "开始下载音频流，状态: %d", status_code);
@@ -2122,14 +2122,17 @@ void Esp32Music::DownloadAudioStreamImpl(const std::string& music_url) {
     ESP_LOGI(TAG, "开始时间: %lld", (long long)start_time.time_since_epoch().count());
 
     // 限制下载线程的流量
-    const size_t MAX_BYTES_PER_SECOND = 50 * 1024;
+    const size_t MAX_BYTES_PER_SECOND = 100 * 1024;
     size_t bytes_this_second = 0;
     auto second_start = std::chrono::steady_clock::now();
 
     // 重置事件组
     resetEvents();
 
-    while (is_downloading_ && is_playing_) {
+    const int max_retries = 3;  // 最多重试 3 次
+    int retry_count = 0;
+
+    while (is_downloading_ && is_playing_ && retry_count <= max_retries) {
         // 🔥 速率控制检查
         auto now = std::chrono::steady_clock::now();
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -2143,8 +2146,24 @@ void Esp32Music::DownloadAudioStreamImpl(const std::string& music_url) {
 
         int bytes_read = http_client_->Read(download_buffer_, chunk_size);
         if (bytes_read < 0) {
+            if (retry_count < max_retries) {
+                ESP_LOGW(TAG, "下载中断 (错误码 %d)，尝试断点续传 %d/%d，已下载 %ld 字节",
+                         bytes_read, retry_count + 1, max_retries, local_downloaded_bytes);
+
+                retry_count++;
+                int retry_status = connect_http(local_downloaded_bytes);
+
+                if (retry_status == 206) {
+                    status_code = retry_status;
+                    bytes_this_second = 0;
+                    second_start = std::chrono::steady_clock::now();
+                    continue;  // 续传成功，继续下载
+                }
+
+                ESP_LOGE(TAG, "断点续传失败，状态码: %d", retry_status);
+            }
+
             signalWIFIError();
-          
             ESP_LOGE(TAG, "读取音频数据失败: 错误码 %d", bytes_read);
             break;
         }

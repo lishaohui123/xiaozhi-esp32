@@ -14,5 +14,9 @@ add_compile_options(-Wno-missing-field-initializers)
 include_directories(${CMAKE_SOURCE_DIR})
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+
+# 在这里加这一行 👇
+idf_build_set_property(COMPILE_DEFINITIONS "-DPBUF_POOL_SIZE=40" APPEND)
+
 project(xiaozhi)
 
