@@ -125,6 +125,10 @@ void Application::Initialize() {
     // Setup the display
     auto display = board.GetDisplay();
 
+    // Check for new assets version
+    // 因为要上电之后显示默认gif，提前调用了这个函数
+    CheckAssetsVersion();
+
     // Print board name/version info
     // display->SetChatMessage("system", SystemInfo::GetUserAgent().c_str());
 
@@ -401,10 +405,10 @@ void Application::ActivationTask() {
     ota_ = std::make_unique<Ota>();
 
     InitializeGloableVar();
-
+#if 0
     // Check for new assets version
     CheckAssetsVersion();
-
+#endif
     // Check for new firmware version
     CheckNewVersion();
 

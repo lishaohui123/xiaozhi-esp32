@@ -1,7 +1,5 @@
-
 #ifndef _BOARD_CONFIG_H_
 #define _BOARD_CONFIG_H_
-
 
 #include <driver/gpio.h>
 
@@ -16,8 +14,7 @@
 #define AUDIO_I2S_GPIO_DIN GPIO_NUM_14
 #define AUDIO_I2S_GPIO_DOUT GPIO_NUM_10
 
-
-#define AUDIO_CODEC_PA_PIN       GPIO_NUM_46
+#define AUDIO_CODEC_PA_PIN       GPIO_NUM_NC
 #define AUDIO_CODEC_I2C_SDA_PIN GPIO_NUM_41
 #define AUDIO_CODEC_I2C_SCL_PIN GPIO_NUM_42
 #define AUDIO_CODEC_ES8388_ADDR ES8388_CODEC_DEFAULT_ADDR
@@ -29,46 +26,39 @@
 
 #define BUILTIN_LED_GPIO GPIO_NUM_1
 
-#define DISPLAY_WIDTH   240
-#define DISPLAY_HEIGHT  240
+// ST7735 0.9寸 128x128 圆形屏
+// 诊断结论：白→黑、黑→白 表示面板存在反相特性，需要 DISPLAY_INVERT_COLOR=true 让驱动发 INVON 切换。
+// 注：虽然 esp32-cgc 的 ST7735_128X128 用 false，但本面板的 OTP 默认状态不同，需要 true。
+#define DISPLAY_WIDTH   128
+#define DISPLAY_HEIGHT  128
 #define DISPLAY_MIRROR_X true
-#define DISPLAY_MIRROR_Y false
+#define DISPLAY_MIRROR_Y true
 #define DISPLAY_SWAP_XY false
+#define DISPLAY_INVERT_COLOR    true
+#define DISPLAY_RGB_ORDER  LCD_RGB_ELEMENT_ORDER_BGR
 
-#define DISPLAY_OFFSET_X  0
-#define DISPLAY_OFFSET_Y  0
+// ST7735 128x128 圆屏偏移量（与 esp32-cgc 一致）
+#define DISPLAY_OFFSET_X  2
+#define DISPLAY_OFFSET_Y  3
 
 #define DISPLAY_BACKLIGHT_PIN GPIO_NUM_48
 #define DISPLAY_BACKLIGHT_OUTPUT_INVERT false
 
-#define DISPLAY_SPI_SCLK_PIN    GPIO_NUM_12
-#define DISPLAY_SPI_MOSI_PIN    GPIO_NUM_11
-#define DISPLAY_SPI_CS_PIN      GPIO_NUM_21
-#define DISPLAY_SPI_DC_PIN      GPIO_NUM_13
-#define DISPLAY_SPI_RESET_PIN   GPIO_NUM_47
+#define DISPLAY_SCLK_PIN    GPIO_NUM_12
+#define DISPLAY_MOSI_PIN    GPIO_NUM_11
+#define DISPLAY_CS_PIN      GPIO_NUM_21
+#define DISPLAY_DC_PIN      GPIO_NUM_13
+#define DISPLAY_RESET_PIN   GPIO_NUM_47
 
-#define DISPLAY_SPI_SCLK_HZ     (40 * 1000 * 1000)
+// SPI 时钟 20MHz（与 esp32-cgc 一致）
+#define DISPLAY_SPI_SCLK_HZ     (20 * 1000 * 1000)
+#define DISPLAY_SPI_MODE        0
 
-
-/* 相机引脚配置 */
-#define CAM_PIN_PWDN    GPIO_NUM_NC
-#define CAM_PIN_RESET   GPIO_NUM_NC
-#define CAM_PIN_VSYNC   GPIO_NUM_47
-#define CAM_PIN_HREF    GPIO_NUM_48
-#define CAM_PIN_PCLK    GPIO_NUM_45
-#define CAM_PIN_XCLK    GPIO_NUM_NC
-#define CAM_PIN_SIOD    GPIO_NUM_39
-#define CAM_PIN_SIOC    GPIO_NUM_38
-#define CAM_PIN_D0      GPIO_NUM_4
-#define CAM_PIN_D1      GPIO_NUM_5
-#define CAM_PIN_D2      GPIO_NUM_6
-#define CAM_PIN_D3      GPIO_NUM_7
-#define CAM_PIN_D4      GPIO_NUM_15
-#define CAM_PIN_D5      GPIO_NUM_16
-#define CAM_PIN_D6      GPIO_NUM_17
-#define CAM_PIN_D7      GPIO_NUM_18
-#define OV_PWDN_IO      4
-#define OV_RESET_IO     5
+// 兼容旧宏
+#define DISPLAY_SPI_SCLK_PIN    DISPLAY_SCLK_PIN
+#define DISPLAY_SPI_MOSI_PIN    DISPLAY_MOSI_PIN
+#define DISPLAY_SPI_CS_PIN      DISPLAY_CS_PIN
+#define DISPLAY_SPI_DC_PIN      DISPLAY_DC_PIN
+#define DISPLAY_SPI_RESET_PIN   DISPLAY_RESET_PIN
 
 #endif // _BOARD_CONFIG_H_
-

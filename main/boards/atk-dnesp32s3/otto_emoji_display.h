@@ -24,11 +24,15 @@ public:
     virtual void SetEmotion(const char* emotion) override;
     virtual void SetChatMessage(const char* role, const char* content) override;
     virtual void SetPreviewImage(std::unique_ptr<LvglImage> image) override;
+    virtual void SetTheme(Theme* theme) override;
 
 private:
     void SetupEmojiContainer();
     const LvglImage* GetEmojiImage(const char* emotion);
+    static bool IsGifFormat(const uint8_t* data, size_t size);
+    void ShowEmojiImage(const LvglImage* img);
 
-    lv_obj_t* emotion_image_;
+    lv_obj_t* emotion_image_;  // 用于PNG
+    lv_obj_t* emotion_gif_;    // 用于GIF
     std::map<std::string, std::unique_ptr<LvglAllocatedImage>> emoji_cache_;
 };
