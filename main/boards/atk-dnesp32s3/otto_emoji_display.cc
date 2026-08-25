@@ -217,7 +217,69 @@ const LvglImage* OttoEmojiDisplay::GetEmojiImage(const char* emotion) {
     ESP_LOGI(TAG, "GetEmojiImage('%s'): 回退到内置Twemoji32", emotion);
     return default_emoji_collection.GetEmojiImage(emotion);
 }
+#if 1
+void OttoEmojiDisplay::SetEmotion(const char *emotion) {
+    if (!emotion || !emotion_image_) {
+        return;
+    }
 
+    // ========================================================
+    // 【新增转换逻辑】：将多个不同表情名称映射到同一个核心组名
+    // ========================================================
+    const char* mapped_emotion = emotion; // 默认使用原名称
+
+    // 1. 中性/平静组 -> 映射为 "staticstate"
+    if (strcmp(emotion, "neutral") == 0 || strcmp(emotion, "relaxed") == 0 || 
+        strcmp(emotion, "sleepy") == 0 || strcmp(emotion, "idle") == 0 || 
+        strcmp(emotion, "staticstate") == 0) {
+        mapped_emotion = "neutral";
+    }
+    // 2. 开心/活泼组 -> 映射为 "happy"
+    else if (strcmp(emotion, "happy") == 0 || strcmp(emotion, "laughing") == 0 ||
+             strcmp(emotion, "funny") == 0 || strcmp(emotion, "loving") == 0 ||
+             strcmp(emotion, "confident") == 0 || strcmp(emotion, "winking") == 0 ||
+             strcmp(emotion, "cool") == 0 || strcmp(emotion, "delicious") == 0 ||
+             strcmp(emotion, "kissy") == 0 || strcmp(emotion, "silly") == 0) {
+        mapped_emotion = "happy";
+    }
+    // 3. 悲伤组 -> 映射为 "sad"
+    else if (strcmp(emotion, "sad") == 0 || strcmp(emotion, "crying") == 0) {
+        mapped_emotion = "sad";
+    }
+    // 4. 愤怒组 -> 映射为 "anger"
+    else if (strcmp(emotion, "anger") == 0 || strcmp(emotion, "angry") == 0) {
+        mapped_emotion = "anger";
+    }
+    // 5. 惊讶组 -> 映射为 "scare"
+    else if (strcmp(emotion, "scare") == 0 || strcmp(emotion, "surprised") == 0 ||
+             strcmp(emotion, "shocked") == 0) {
+        mapped_emotion = "scare";
+    }
+    // 6. 思考/困惑组 -> 映射为 "buxue"
+    else if (strcmp(emotion, "buxue") == 0 || strcmp(emotion, "thinking") == 0 ||
+             strcmp(emotion, "confused") == 0 || strcmp(emotion, "embarrassed") == 0) {
+        mapped_emotion = "buxue";
+    }
+    // ========================================================
+
+    DisplayLockGuard lock(this);
+
+    // 使用映射后的组名去底层获取图片资源
+    const LvglImage* img = GetEmojiImage(mapped_emotion);
+    if (img) {
+        ShowEmojiImage(img);
+        ESP_LOGI(TAG, "设置表情: %s -> 映射到组: %s", emotion, mapped_emotion);
+    } else {
+        // 万一 GetEmojiImage 因为缺少组资源失败，回退到 neutral
+        const LvglImage* neutral_img = GetEmojiImage("neutral");
+        if (neutral_img) {
+            ShowEmojiImage(neutral_img);
+        }
+        ESP_LOGI(TAG, "未知表情或资源缺失 '%s'，使用默认组", emotion);
+    }
+}
+#endif
+#if 0
 void OttoEmojiDisplay::SetEmotion(const char *emotion) {
     if (!emotion || !emotion_image_) {
         return;
@@ -237,7 +299,7 @@ void OttoEmojiDisplay::SetEmotion(const char *emotion) {
         ESP_LOGI(TAG, "未知表情'%s'，使用默认", emotion);
     }
 }
-
+#endif
 void OttoEmojiDisplay::SetPreviewImage(std::unique_ptr<LvglImage> image) {
     DisplayLockGuard lock(this);
     return;

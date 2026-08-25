@@ -29,17 +29,20 @@
 // ST7735 0.9寸 128x128 圆形屏
 // 诊断结论：白→黑、黑→白 表示面板存在反相特性，需要 DISPLAY_INVERT_COLOR=true 让驱动发 INVON 切换。
 // 注：虽然 esp32-cgc 的 ST7735_128X128 用 false，但本面板的 OTP 默认状态不同，需要 true。
-#define DISPLAY_WIDTH   128
-#define DISPLAY_HEIGHT  128
-#define DISPLAY_MIRROR_X true
-#define DISPLAY_MIRROR_Y true
+#define DISPLAY_WIDTH   240
+#define DISPLAY_HEIGHT  240
+#define DISPLAY_MIRROR_X false
+#define DISPLAY_MIRROR_Y false
 #define DISPLAY_SWAP_XY false
 #define DISPLAY_INVERT_COLOR    true
 #define DISPLAY_RGB_ORDER  LCD_RGB_ELEMENT_ORDER_BGR
 
 // ST7735 128x128 圆屏偏移量（与 esp32-cgc 一致）
-#define DISPLAY_OFFSET_X  2
-#define DISPLAY_OFFSET_Y  3
+// #define DISPLAY_OFFSET_X  2
+// #define DISPLAY_OFFSET_Y 3
+
+#define DISPLAY_OFFSET_X  0
+#define DISPLAY_OFFSET_Y  0
 
 #define DISPLAY_BACKLIGHT_PIN GPIO_NUM_48
 #define DISPLAY_BACKLIGHT_OUTPUT_INVERT false

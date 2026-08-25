@@ -27,6 +27,7 @@
 #include <esp_lcd_panel_ops.h>
 #include <esp_event.h>
 #include <vector>
+#include <esp_lcd_gc9a01.h>
 
 #define TAG "atk_dnesp32s3"
 
@@ -34,7 +35,7 @@ class atk_dnesp32s3 : public WifiBoard {
 private:
     i2c_master_bus_handle_t i2c_bus_;
     Button boot_button_;
-    OttoEmojiDisplay* display_;
+    OttoEmojiDisplay *display_;
     Music* music_;
     esp_lcd_panel_io_handle_t panel_io = nullptr;
     esp_lcd_panel_handle_t panel = nullptr;
@@ -86,6 +87,36 @@ private:
         buscfg.quadhd_io_num = GPIO_NUM_NC;
         buscfg.max_transfer_sz = DISPLAY_WIDTH * DISPLAY_HEIGHT * sizeof(uint16_t);
         ESP_ERROR_CHECK(spi_bus_initialize(SPI3_HOST, &buscfg, SPI_DMA_CH_AUTO));
+    }
+
+    void InitializeGc9a01Display() {
+        ESP_LOGI(TAG, "Init GC9A01 display");
+        ESP_LOGI(TAG, "Install panel IO");
+        esp_lcd_panel_io_spi_config_t io_config = GC9A01_PANEL_IO_SPI_CONFIG(DISPLAY_SPI_CS_PIN, DISPLAY_SPI_DC_PIN, 0, NULL);
+        io_config.pclk_hz = DISPLAY_SPI_SCLK_HZ;
+        ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi(SPI3_HOST, &io_config, &panel_io));
+
+        ESP_LOGI(TAG, "Install GC9A01 panel driver");
+        esp_lcd_panel_dev_config_t panel_config = {};
+        panel_config.reset_gpio_num = DISPLAY_SPI_RESET_PIN;
+        panel_config.rgb_endian = LCD_RGB_ENDIAN_BGR;
+        panel_config.bits_per_pixel = 16;
+
+        ESP_ERROR_CHECK(esp_lcd_new_panel_gc9a01(panel_io, &panel_config, &panel));
+        ESP_ERROR_CHECK(esp_lcd_panel_reset(panel));
+        ESP_ERROR_CHECK(esp_lcd_panel_init(panel));
+        ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel, true));
+        ESP_ERROR_CHECK(esp_lcd_panel_mirror(panel, true, false));
+        ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel, true));
+
+        uint8_t data_0x62[] = { 0x18, 0x0D, 0x71, 0xED, 0x70, 0x70, 0x18, 0x0F, 0x71, 0xEF, 0x70, 0x70 };
+        esp_lcd_panel_io_tx_param(panel_io, 0x62, data_0x62, sizeof(data_0x62));
+
+        uint8_t data_0x63[] = { 0x18, 0x11, 0x71, 0xF1, 0x70, 0x70, 0x18, 0x13, 0x71, 0xF3, 0x70, 0x70 };
+        esp_lcd_panel_io_tx_param(panel_io, 0x63, data_0x63, sizeof(data_0x63));
+
+        display_ = new OttoEmojiDisplay(panel_io, panel,
+                                    DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
     }
 
     void InitializeButtons() {
@@ -187,7 +218,8 @@ public:
 
         InitializeI2c();
         InitializeSpi();
-        InitializeSt7735Display();
+        InitializeGc9a01Display();
+        // InitializeSt7735Display();
         InitializeButtons();
         if (DISPLAY_BACKLIGHT_PIN != GPIO_NUM_NC) {
             // 临时先设 50% 亮度降低背光电流（WiFi 启动峰值时刻避开 brownout）
@@ -229,7 +261,7 @@ public:
         return display_;
     }
 	
-	    virtual void StartNetwork() override {
+	virtual void StartNetwork() override {
         // 在父类 StartNetwork 之前注册 WiFi/IP 事件钩子，
         // 保证 esp_wifi_start() 刚返回就调用 esp_wifi_set_max_tx_power(8dBm) 限峰电流
         if (!wifi_evt_inst_) {
