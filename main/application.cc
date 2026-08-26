@@ -27,6 +27,24 @@
 #define TAG "Application"
 
 
+static std::string urlEncode(const std::string &value) {
+    std::ostringstream escaped;
+    escaped.fill('0');
+    escaped << std::hex;
+
+    for (char c : value) {
+        if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
+            escaped << c;
+            continue;
+        }
+        
+        escaped << std::uppercase;
+        escaped << '%' << std::setw(2) << int((unsigned char)c);
+        escaped << std::nouppercase;
+    }
+
+    return escaped.str();
+}
 
 // URL编码函数
 static std::string url_encode(const std::string& str) {
@@ -118,9 +136,9 @@ void Application::Initialize() {
     auto& board = Board::GetInstance();
     SetDeviceState(kDeviceStateStarting);
 
-    IOT* iot = board.GetIOT();
-    iot->SPK_EN_init();
-    SPK_EN(1);
+    // IOT* iot = board.GetIOT();
+    // iot->SPK_EN_init();
+    // SPK_EN(1);
 
     // Setup the display
     auto display = board.GetDisplay();
@@ -427,6 +445,8 @@ void Application::ActivationTask() {
 
     InitializeMqtt();
 
+    StartupCorpus();
+
     // Signal completion to main loop
     xEventGroupSetBits(event_group_, MAIN_EVENT_ACTIVATION_DONE);
 }
@@ -677,6 +697,13 @@ void Application::InitializeMqtt() {
     vTaskDelay(pdMS_TO_TICKS(500));
 
     ESP_LOGI(TAG, "初始化音视频功能成功 OK 啦 OK 啦 OK 啦了");
+}
+
+void Application::StartupCorpus() {
+    ESP_LOGI(TAG, "启动成功，小龙向小主人打招呼");
+
+    std::string startup_corpus_url = std::format("{}StartupCorpus?deviceId={}&voiceType={}", OTA_URI, GloableVar::device_id, urlEncode(GloableVar::voice_type));;
+    Board::GetInstance().GetMusic()->PlayVoice(startup_corpus_url, 1);
 }
 
 void Application::SW_Vibrating_init(void)

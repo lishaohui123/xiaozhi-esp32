@@ -209,6 +209,8 @@ private:
 
     void InitializeMqtt();
 
+    void StartupCorpus();
+
     void SW_Vibrating_init(void);
 
     void InitializeDebounceTouchThread();

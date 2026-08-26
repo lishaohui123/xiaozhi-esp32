@@ -32,9 +32,11 @@
 #define TAG "atk_dnesp32s3"
 
 class atk_dnesp32s3 : public WifiBoard {
+public:
+    Button boot_button_;
+  
 private:
     i2c_master_bus_handle_t i2c_bus_;
-    Button boot_button_;
     OttoEmojiDisplay *display_;
     Music* music_;
     esp_lcd_panel_io_handle_t panel_io = nullptr;
@@ -120,19 +122,33 @@ private:
     }
 
     void InitializeButtons() {
-#if 0
-        boot_button_.OnClick([this]() {
-            auto& app = Application::GetInstance();
-            if (app.GetDeviceState() == kDeviceStateStarting) {
-                EnterWifiConfigMode();
-                return;
-            }
-            app.ToggleChatState();
-        });
-#endif
-        boot_button_.OnDoubleClick([this]() {    // 新增的双击 → 蓝牙配网
+
+        // 新增的双击 → 蓝牙配网
+        boot_button_.OnDoubleClick([this]() {
             EnterWifiConfigMode();
         });
+
+        // GetIOT()->SPK_EN_init();
+        // SPK_EN(1);
+
+        // 长按开关键 → 关机
+        esp_timer_handle_t timer_handle_ = nullptr;
+        esp_timer_create_args_t timer_args = {
+            .callback = [](void* arg) {
+                auto* board = (atk_dnesp32s3*)arg;
+                board->boot_button_.OnLongPress([board]() {
+                    SPK_EN(0);
+                });
+            },
+            .arg = this,
+        };
+        esp_timer_create(&timer_args, &timer_handle_);
+        esp_timer_start_once(timer_handle_, 20 * 1000 * 1000);
+            
+        
+        // boot_button_.OnLongPress([this]() {
+        //   SPK_EN(0);
+        // });
     }
 
     void SendCmd(uint8_t cmd, const uint8_t* data, size_t len) {
