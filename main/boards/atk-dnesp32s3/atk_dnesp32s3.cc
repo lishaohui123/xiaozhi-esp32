@@ -128,9 +128,6 @@ private:
             EnterWifiConfigMode();
         });
 
-        // GetIOT()->SPK_EN_init();
-        // SPK_EN(1);
-
         // 长按开关键 → 关机
         esp_timer_handle_t timer_handle_ = nullptr;
         esp_timer_create_args_t timer_args = {
@@ -144,11 +141,6 @@ private:
         };
         esp_timer_create(&timer_args, &timer_handle_);
         esp_timer_start_once(timer_handle_, 20 * 1000 * 1000);
-            
-        
-        // boot_button_.OnLongPress([this]() {
-        //   SPK_EN(0);
-        // });
     }
 
     void SendCmd(uint8_t cmd, const uint8_t* data, size_t len) {

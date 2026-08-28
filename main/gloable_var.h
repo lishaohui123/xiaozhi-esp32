@@ -13,6 +13,8 @@ public:
     static std::string work_detail_url;
     static volatile int mode_realtime;
     static int volume;
+    static std::string mqtt_user_name;
+    static std::string mqtt_password;
 
     static std::string tts_api_url;
     static std::string tts_api_key;

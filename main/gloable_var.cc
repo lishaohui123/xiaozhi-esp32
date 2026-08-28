@@ -37,6 +37,8 @@ std::string GloableVar::device_id;
 std::string GloableVar::work_detail_url;
 volatile int GloableVar::mode_realtime;
 int GloableVar::volume;
+std::string GloableVar::mqtt_user_name;
+std::string GloableVar::mqtt_password;
 
 // 定义新增的TTS静态变量
 std::string GloableVar::tts_api_url;
@@ -293,6 +295,16 @@ int GloableVar::get_gloable_var() {
     cJSON* volume_item = cJSON_GetObjectItem(root, "volume");
     if (cJSON_IsNumber(volume_item)) {
         volume = volume_item->valueint;   // 获取整数值
+    }
+
+    cJSON* mqttUserName = cJSON_GetObjectItem(root, "mqttUserName");
+    if (cJSON_IsString(mqttUserName) && mqttUserName->valuestring) {
+        mqtt_user_name = mqttUserName->valuestring;
+    }
+
+    cJSON* mqttPassword = cJSON_GetObjectItem(root, "mqttPassword");
+    if (cJSON_IsString(mqttPassword) && mqttPassword->valuestring) {
+        mqtt_password = mqttPassword->valuestring;
     }
 
     cJSON_Delete(root);

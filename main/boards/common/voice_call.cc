@@ -331,7 +331,7 @@ esp_err_t VoiceCall::initMqtt(const std::string& device_id, const std::string& d
     });
 
     // 连接MQTT
-    if (!mqtt_->Connect(MQTT_HOST, 1883, m_device_info.device_id, "", "")) {
+    if (!mqtt_->Connect(MQTT_HOST, 1883, m_device_info.device_id, GloableVar::mqtt_user_name, GloableVar::mqtt_password)) {
 		esp_timer_start_once(reconnect_timer_, MQTT_RECONNECT_INTERVAL_MS * 1000);
 		
         ESP_LOGE(TAG, "Failed to connect to endpoint, code=%d", mqtt_->GetLastError());

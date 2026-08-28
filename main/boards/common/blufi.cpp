@@ -3,8 +3,10 @@
 #include <cassert>
 #include <cstring>
 #include <string>
-#include "constants.h"
 
+#include "constants.h"
+#include "board.h"
+#include "display.h"
 #include "application.h"
 #include "esp_bt.h"
 #include "esp_log.h"
@@ -553,6 +555,7 @@ void Blufi::_handle_event(esp_blufi_cb_event_t event, esp_blufi_cb_param_t *para
     switch (event) {
         case ESP_BLUFI_EVENT_INIT_FINISH:
             ESP_LOGI(BLUFI_TAG, "BLUFI init finish");
+            Board::GetInstance().GetDisplay()->SetEmotion("blufi");
             esp_blufi_adv_start();
             break;
         case ESP_BLUFI_EVENT_DEINIT_FINISH:

@@ -115,9 +115,11 @@ void WifiBoard::OnNetworkEvent(NetworkEvent event, const std::string& data) {
 #endif
             in_config_mode_ = false;
             ESP_LOGI(TAG, "Connected to WiFi: %s", data.c_str());
+            Board::GetInstance().GetDisplay()->SetEmotion("neutral");
             break;
         case NetworkEvent::Scanning:
             ESP_LOGI(TAG, "WiFi scanning");
+            Board::GetInstance().GetDisplay()->SetEmotion("wifi");
             break;
         case NetworkEvent::Connecting:
             ESP_LOGI(TAG, "WiFi connecting to %s", data.c_str());

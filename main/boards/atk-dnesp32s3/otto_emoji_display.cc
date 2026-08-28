@@ -212,10 +212,12 @@ const LvglImage* OttoEmojiDisplay::GetEmojiImage(const char* emotion) {
     } else {
         ESP_LOGW(TAG, "GetEmojiImage('%s'): 无自定义表情集合", emotion);
     }
-
+#if 0
     static Twemoji32 default_emoji_collection;
     ESP_LOGI(TAG, "GetEmojiImage('%s'): 回退到内置Twemoji32", emotion);
     return default_emoji_collection.GetEmojiImage(emotion);
+#endif
+    return nullptr;
 }
 #if 1
 void OttoEmojiDisplay::SetEmotion(const char *emotion) {
@@ -259,6 +261,14 @@ void OttoEmojiDisplay::SetEmotion(const char *emotion) {
     else if (strcmp(emotion, "buxue") == 0 || strcmp(emotion, "thinking") == 0 ||
              strcmp(emotion, "confused") == 0 || strcmp(emotion, "embarrassed") == 0) {
         mapped_emotion = "buxue";
+    }
+    // 增加wifi 的设置
+    else if (strcmp(emotion, "wifi") == 0) {
+        mapped_emotion = "delicious";
+    }
+    // 增加蓝牙的设置
+    else if (strcmp(emotion, "blufi") == 0) {
+        mapped_emotion = "confused";
     }
     // ========================================================
 
