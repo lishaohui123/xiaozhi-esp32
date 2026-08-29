@@ -250,17 +250,17 @@ void OttoEmojiDisplay::SetEmotion(const char *emotion) {
     }
     // 4. 愤怒组 -> 映射为 "anger"
     else if (strcmp(emotion, "anger") == 0 || strcmp(emotion, "angry") == 0) {
-        mapped_emotion = "anger";
+        mapped_emotion = "angry";
     }
     // 5. 惊讶组 -> 映射为 "scare"
     else if (strcmp(emotion, "scare") == 0 || strcmp(emotion, "surprised") == 0 ||
              strcmp(emotion, "shocked") == 0) {
-        mapped_emotion = "scare";
+        mapped_emotion = "surprised";
     }
     // 6. 思考/困惑组 -> 映射为 "buxue"
     else if (strcmp(emotion, "buxue") == 0 || strcmp(emotion, "thinking") == 0 ||
              strcmp(emotion, "confused") == 0 || strcmp(emotion, "embarrassed") == 0) {
-        mapped_emotion = "buxue";
+        mapped_emotion = "thinking";
     }
     // 增加wifi 的设置
     else if (strcmp(emotion, "wifi") == 0) {
