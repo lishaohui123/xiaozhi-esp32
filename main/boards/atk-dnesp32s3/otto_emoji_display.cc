@@ -270,6 +270,10 @@ void OttoEmojiDisplay::SetEmotion(const char *emotion) {
     else if (strcmp(emotion, "blufi") == 0) {
         mapped_emotion = "confused";
     }
+    // 增加固件升级的表情
+    else if (strcmp(emotion, "update") == 0) {
+        mapped_emotion = "loving";
+    }
     // ========================================================
 
     DisplayLockGuard lock(this);

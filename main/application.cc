@@ -621,6 +621,8 @@ void Application::UpdateFirmware(void *arg) {
         application->ota_->CheckVersion();
 
         if (application->ota_->HasNewVersion()) {
+            Board::GetInstance().GetDisplay()->SetEmotion("update");
+          
             ESP_LOGI(TAG, "正在进行升级。%s %s", application->ota_->GetFirmwareUrl().c_str(),application->ota_->GetFirmwareVersion().c_str());
     #if 1
             std::string s = "小主人，正在进行升级，请保持设备处于开机状态。";
@@ -1421,7 +1423,7 @@ bool Application::UpgradeFirmware(const std::string& url, const std::string& ver
     }
     ESP_LOGI(TAG, "Starting firmware upgrade from URL: %s", upgrade_url.c_str());
 
-    Alert(Lang::Strings::OTA_UPGRADE, Lang::Strings::UPGRADING, "download", Lang::Sounds::OGG_UPGRADE);
+    Alert(Lang::Strings::OTA_UPGRADE, Lang::Strings::UPGRADING, "update", Lang::Sounds::OGG_UPGRADE);
     vTaskDelay(pdMS_TO_TICKS(3000));
 
     SetDeviceState(kDeviceStateUpgrading);
