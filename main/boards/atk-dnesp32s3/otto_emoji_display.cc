@@ -274,6 +274,10 @@ void OttoEmojiDisplay::SetEmotion(const char *emotion) {
     else if (strcmp(emotion, "update") == 0) {
         mapped_emotion = "loving";
     }
+    // 增加待机的表情
+    else if (strcmp(emotion, "sleep") == 0) {
+        mapped_emotion = "sleepy";
+    }
     // ========================================================
 
     DisplayLockGuard lock(this);

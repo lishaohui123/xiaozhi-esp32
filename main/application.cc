@@ -136,9 +136,9 @@ void Application::Initialize() {
     auto& board = Board::GetInstance();
     SetDeviceState(kDeviceStateStarting);
 
-    // IOT* iot = board.GetIOT();
-    // iot->SPK_EN_init();
-    // SPK_EN(1);
+    IOT* iot = board.GetIOT();
+    iot->SPK_EN_init();
+    SPK_EN(1);
 
     // Setup the display
     auto display = board.GetDisplay();
@@ -239,11 +239,16 @@ void Application::Initialize() {
         }
     });
 
+    // 增加wifi启动的时间
+    vTaskDelay(pdMS_TO_TICKS(3000));
+
     // Start network asynchronously
     board.StartNetwork();
 
     // Update the status bar immediately to show the network state
     // display->UpdateStatusBar(true);
+
+    isInit_ = true;
 }
 
 void Application::Run() {
@@ -568,7 +573,7 @@ void Application::CheckNewVersion() {
             // ShowActivationCode(ota_->GetActivationCode(), ota_->GetActivationMessage());
 
             if (blue_device == "")  {
-                std::string s = "小主人，请先长按开关键四到五秒来开机，然后先双击开关键，进行蓝牙配网";
+                std::string s = "小主人，请先长按开关键进行开机，当眼睛出现wifi时，双击开关键进行蓝牙配网";
                 auto& alarm_manager = AlarmManager::GetInstance();
                 alarm_manager.PlayTtsAudioStreamVoice(s, 3);
 
@@ -993,7 +998,7 @@ void Application::InitializeProtocol() {
         }
 #endif
     });
-    
+
     protocol_->OnAudioChannelClosed([this, &board]() {
         board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
         Schedule([this]() {
@@ -1315,9 +1320,22 @@ void Application::HandleStateChangedEvent() {
     
     switch (new_state) {
         case kDeviceStateUnknown:
-        case kDeviceStateIdle:
             // display->SetStatus(Lang::Strings::STANDBY);
             display->SetEmotion("neutral");
+            audio_service_.EnableVoiceProcessing(false);
+            audio_service_.EnableWakeWordDetection(true);
+            break;
+        case kDeviceStateIdle:
+            // display->SetStatus(Lang::Strings::STANDBY);
+
+            if (CanEnterSleepMode() == true && isInit_ == false) {
+                board.GetDisplay()->SetEmotion("sleep");
+            } else {
+                isInit_ = false;
+                board.GetDisplay()->SetEmotion("neutral");
+            }
+
+            // display->SetEmotion("neutral");
             audio_service_.EnableVoiceProcessing(false);
             audio_service_.EnableWakeWordDetection(true);
             break;
