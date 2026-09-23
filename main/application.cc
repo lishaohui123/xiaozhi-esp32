@@ -614,7 +614,7 @@ void Application::UpdateFirmwareTask() {
         app->update_firmware_task_handle_ = nullptr;
 
         vTaskDelete(NULL);
-    }, "UpdateFirmwareTask", 1024 * 48, this, 2, &update_firmware_task_handle_);
+    }, "UpdateFirmwareTask", 1024 * 32, this, 2, &update_firmware_task_handle_);
     assert(update_firmware_task_handle_ != nullptr);
 }
 

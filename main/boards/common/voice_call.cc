@@ -1044,9 +1044,12 @@ void VoiceCall::handle_device_set(const char* payload) {
 * 进行固件的自动升级
 *********************************************/
 void VoiceCall::handle_device_update(const char* payload) {
-
-    Application::GetInstance().UpdateFirmwareTask();
-
+    if ((kDeviceStateIdle == Application::GetInstance().GetDeviceState()) && (Application::GetInstance().GetAudioService().is_voice_out_ == false)) {
+        Application::GetInstance().UpdateFirmwareTask();
+    }
+    else {
+        ESP_LOGI(TAG, "忽略此次升级指令");
+    }
 }
 
 /*********************************************
