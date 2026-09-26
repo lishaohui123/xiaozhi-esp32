@@ -140,6 +140,10 @@ void Application::Initialize() {
     iot->SPK_EN_init();
     SPK_EN(1);
 
+    // 电池使能和充电电流的限制
+    SPK_EN_IO5(1);
+    SPK_EN_IO17(1);
+
     // Setup the display
     auto display = board.GetDisplay();
 
@@ -511,7 +515,7 @@ void Application::CheckAssetsVersion() {
     // Apply assets
     assets.Apply();
     // display->SetChatMessage("system", "");
-    display->SetEmotion("neutral");
+    display->SetEmotion("start");
 }
 
 void Application::CheckNewVersion() {

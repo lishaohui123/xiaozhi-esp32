@@ -169,6 +169,17 @@ enum GPIO_OUTPUT_STATE
                         } while(0)  /* LED翻转 */
 
 
+#define SPK_EN_IO5(x)          do { x ?                                      \
+                             gpio_set_level(GPIO_NUM_5, PIN_SET) :  \
+                             gpio_set_level(GPIO_NUM_5, PIN_RESET); \
+                        } while(0)
+
+#define SPK_EN_IO17(x)          do { x ?                                      \
+                             gpio_set_level(GPIO_NUM_17, PIN_SET) :  \
+                             gpio_set_level(GPIO_NUM_17, PIN_RESET); \
+                        } while(0)
+
+
 #define SPI_CS0_GPIO_PIN    GPIO_NUM_21  /* LED连接的GPIO端口 */
 
 /* 引脚的输出的电平状态 */

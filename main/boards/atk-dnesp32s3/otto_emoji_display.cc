@@ -278,6 +278,10 @@ void OttoEmojiDisplay::SetEmotion(const char *emotion) {
     else if (strcmp(emotion, "sleep") == 0) {
         mapped_emotion = "sleepy";
     }
+    // 增加开机的表情
+    else if (strcmp(emotion, "start") == 0) {
+        mapped_emotion = "cool";
+    }
     // ========================================================
 
     DisplayLockGuard lock(this);
