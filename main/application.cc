@@ -450,7 +450,6 @@ void Application::ActivationTask() {
     TOUCH_1_init();
     TOUCH_2_init();
     TOUCH_3_init();
-    TOUCH_4_init();
 
     InitializeMqtt();
 
@@ -738,7 +737,6 @@ void Application::InitializeDebounceTouchThread() {
     touch_pin_map_["head"]  = TOUCH_1_GPIO_PIN;
     touch_pin_map_["hand"]  = TOUCH_2_GPIO_PIN;
     touch_pin_map_["chest"] = TOUCH_3_GPIO_PIN;
-    touch_pin_map_["tail"]  = TOUCH_4_GPIO_PIN;
 
     xTaskCreate([](void* arg) {
         auto this_ = (Application*)arg;
@@ -764,7 +762,6 @@ void Application::TouchDebounceTask(void *arg) {
                 case TouchRegion::HEAD:  region = "head";  break;
                 case TouchRegion::HAND:  region = "hand";  break;
                 case TouchRegion::CHEST: region = "chest"; break;
-                case TouchRegion::TAIL:  region = "tail";  break;
                 default: region = "head";  break;
             }
 
@@ -824,7 +821,7 @@ void Application::TouchTask(void *arg) {
                 {
                     std::string touch_url = std::format("{}touch?deviceId={}&voiceType={}&region={}", OTA_URI, GloableVar::device_id, url_encode(GloableVar::voice_type), region);
                     Board::GetInstance().GetMusic()->PlayTouchAudio(touch_url);
-                } 
+                }
             }
         }
         else {
@@ -862,16 +859,6 @@ static void IRAM_ATTR exit_TOUCH_2_isr_handler(void *arg)
 static void IRAM_ATTR exit_TOUCH_3_isr_handler(void *arg)
 {
     TouchRegion region = TouchRegion::CHEST;
-    BaseType_t higher_priority_task_woken = pdFALSE;
-    xQueueSendFromISR(static_cast<Application*>(arg)->touch_debounce_queue_, &region, &higher_priority_task_woken);
-    if (higher_priority_task_woken) {
-        portYIELD_FROM_ISR();
-    }
-}
-
-static void IRAM_ATTR exit_TOUCH_4_isr_handler(void *arg)
-{
-    TouchRegion region = TouchRegion::TAIL;
     BaseType_t higher_priority_task_woken = pdFALSE;
     xQueueSendFromISR(static_cast<Application*>(arg)->touch_debounce_queue_, &region, &higher_priority_task_woken);
     if (higher_priority_task_woken) {
@@ -931,22 +918,6 @@ void Application::TOUCH_3_init(void)
     
     /* 设置BOOT的中断回调函数 */
     ESP_ERROR_CHECK(gpio_isr_handler_add(TOUCH_3_GPIO_PIN, exit_TOUCH_3_isr_handler, (void*) this));
-}
-
-void Application::TOUCH_4_init(void)
-{
-    gpio_config_t gpio_init_struct;
-
-    /* 配置BOOT引脚和外部中断 */
-    gpio_init_struct.mode = GPIO_MODE_INPUT;                    /* 选择为输入模式 */
-    gpio_init_struct.pull_up_en = GPIO_PULLUP_ENABLE;           /* 上拉使能 */
-    gpio_init_struct.pull_down_en = GPIO_PULLDOWN_DISABLE;      /* 下拉失能 */
-    gpio_init_struct.intr_type = GPIO_INTR_POSEDGE;             /* 上升沿触发 */
-    gpio_init_struct.pin_bit_mask = 1ull << TOUCH_4_GPIO_PIN;   /* 设置的引脚的位掩码 */
-    ESP_ERROR_CHECK(gpio_config(&gpio_init_struct));            /* 配置使能 */
-    
-    /* 设置BOOT的中断回调函数 */
-    ESP_ERROR_CHECK(gpio_isr_handler_add(TOUCH_4_GPIO_PIN, exit_TOUCH_4_isr_handler, (void*) this));
 }
 
 void Application::InitializeProtocol() {

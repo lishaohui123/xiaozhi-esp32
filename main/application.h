@@ -37,13 +37,12 @@
 
 
 /* 引脚定义 */
-#define SW_Vibrating_GPIO_PIN    GPIO_NUM_4     /* 震动电机连接的GPIO端口 */
+#define SW_Vibrating_GPIO_PIN    GPIO_NUM_1     /* 震动电机连接的GPIO端口 */
 #define BOOT_OUT_GPIO_PIN   GPIO_NUM_19         /* 蓝牙配网控制连接的GPIO端口 */
 #define Power_on_GPIO_PIN   GPIO_NUM_20         /* 电源开关控制连接的GPIO端口 */
 #define TOUCH_1_GPIO_PIN    GPIO_NUM_39         /* 触摸模块1控制连接的GPIO端口 */
 #define TOUCH_2_GPIO_PIN    GPIO_NUM_40         /* 触摸模块2控制连接的GPIO端口 */
 #define TOUCH_3_GPIO_PIN    GPIO_NUM_2          /* 触摸模块3控制连接的GPIO端口 */
-#define TOUCH_4_GPIO_PIN    GPIO_NUM_1          /* 触摸模块4控制连接的GPIO端口 */
 
 
 #define SW_Vibrating(x)          do { x ?                                \
@@ -58,7 +57,7 @@ enum AecMode {
     kAecOnServerSide,
 };
 
-enum class TouchRegion : uint8_t { HEAD, HAND, CHEST, TAIL };
+enum class TouchRegion : uint8_t { HEAD, HAND, CHEST };
 
 class Application {
 public:
@@ -222,7 +221,6 @@ private:
     void TOUCH_1_init(void);
     void TOUCH_2_init(void);
     void TOUCH_3_init(void);
-    void TOUCH_4_init(void);
 
     // State change handler called by state machine
     void OnStateChanged(DeviceState old_state, DeviceState new_state);
