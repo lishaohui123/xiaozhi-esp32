@@ -15,7 +15,7 @@
 
 #define CONFIG_OTA_URI "https://api.tenclass.net/xiaozhi/ota/"
 
-#define OTA_WS "ws://180.184.39.135:8000/xiaozhi/v1/"
+// #define OTA_WS "ws://180.184.39.135:8000/xiaozhi/v1/"
 
 #define CONFIG_OTA_WS "ws://api.tenclass.net/xiaozhi/v1/"
 
@@ -33,11 +33,11 @@
 
 #define MQTT_URL "mqtt://bjhaohui.com:1883"
 
-#define OTA_URI "http://bjhaohui.com:8002/xiaozhi/ota/"
+#define OTA_URI "https://bjhaohui.com/xiaozhi/ota/"
 
 #define CONFIG_OTA_URI "https://api.tenclass.net/xiaozhi/ota/"
 
-#define OTA_WS "ws://bjhaohui.com:8000/xiaozhi/v1/"
+// #define OTA_WS "ws://bjhaohui.com:8000/xiaozhi/v1/"
 
 #define CONFIG_OTA_WS "ws://api.tenclass.net/xiaozhi/v1/"
 
