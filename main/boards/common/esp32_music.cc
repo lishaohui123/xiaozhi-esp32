@@ -42,6 +42,19 @@ struct PlayAudioTaskParam {
     std::string music_url;
 };
 
+static bool WaitForStreamingWorkerFinished(const volatile std::atomic<bool>& finished,
+                                           TaskHandle_t handle,
+                                           uint32_t timeout_ms) {
+    uint32_t elapsed_ms = 0;
+    while (handle != nullptr &&
+           !finished.load(std::memory_order_acquire) &&
+           elapsed_ms < timeout_ms) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+        elapsed_ms += 10;
+    }
+    return handle == nullptr || finished.load(std::memory_order_acquire);
+}
+
 // URL编码函数
 static std::string url_encode(const std::string& str) {
     std::string encoded;
@@ -588,25 +601,25 @@ bool Esp32Music::FindWork(const std::string& work_name) {
     auto http = std::unique_ptr<Http>(ota.SetupHttp());
 
     std::shared_ptr<Http> shared_http = std::move(http);
-    http_client_ = std::static_pointer_cast<HttpClient>(shared_http);
-    http_client_->SetKeepAlive(true); // 启用 Keep-Alive
+    std::shared_ptr<HttpClient> client = std::static_pointer_cast<HttpClient>(shared_http);
+    client->SetKeepAlive(true); // 启用 Keep-Alive
     
-    if (!http_client_->Open("GET", url)) {
+    if (!client->Open("GET", url)) {
         ESP_LOGE(TAG, "Failed to open HTTP connection");
-        http_client_->Close();
+        client->Close();
         return false;
     }
 
     // 检查响应状态码
-    int status_code = http_client_->GetStatusCode();
+    int status_code = client->GetStatusCode();
     if (status_code != 200) {
         ESP_LOGE(TAG, "HTTP GET failed with status code: %d", status_code);
-        http_client_->Close();
+        client->Close();
         return false;
     }
 
     // 获取内容长度（如果有的话）
-    size_t content_length = http_client_->GetBodyLength();
+    size_t content_length = client->GetBodyLength();
     ESP_LOGI(TAG, "Content length: %u bytes", content_length);
     
     // 按照Upgrade函数的方式分块读取
@@ -623,7 +636,7 @@ bool Esp32Music::FindWork(const std::string& work_name) {
 
     // 开始读取循环
     while (true) {
-        int ret = http_client_->Read(buffer, sizeof(buffer));
+        int ret = client->Read(buffer, sizeof(buffer));
         
         if (ret < 0) {
             ESP_LOGE(TAG, "Failed to read HTTP data: %d", ret);
@@ -652,7 +665,7 @@ bool Esp32Music::FindWork(const std::string& work_name) {
         }
     }
     
-    http_client_->Close();
+    client->Close();
 
     // 保存数据
     last_downloaded_data_ = response_data;
@@ -698,25 +711,25 @@ bool Esp32Music::FindWorkDetail(const std::string& work_id) {
     auto http = std::unique_ptr<Http>(ota.SetupHttp());
 
     std::shared_ptr<Http> shared_http = std::move(http);
-    http_client_ = std::static_pointer_cast<HttpClient>(shared_http);
-    http_client_->SetKeepAlive(true); // 启用 Keep-Alive
+    std::shared_ptr<HttpClient> client = std::static_pointer_cast<HttpClient>(shared_http);
+    client->SetKeepAlive(true); // 启用 Keep-Alive
 
-    if (!http_client_->Open("GET", url)) {
+    if (!client->Open("GET", url)) {
         ESP_LOGE(TAG, "Failed to open HTTP connection");
-        http_client_->Close();
+        client->Close();
         return false;
     }
 
     // 检查响应状态码
-    int status_code = http_client_->GetStatusCode();
+    int status_code = client->GetStatusCode();
     if (status_code != 200) {
         ESP_LOGE(TAG, "HTTP GET failed with status code: %d", status_code);
-        http_client_->Close();
+        client->Close();
         return false;
     }
 
     // 获取内容长度（如果有的话）
-    size_t content_length = http_client_->GetBodyLength();
+    size_t content_length = client->GetBodyLength();
     ESP_LOGI(TAG, "Content length: %u bytes", content_length);
     
     // 按照Upgrade函数的方式分块读取
@@ -733,7 +746,7 @@ bool Esp32Music::FindWorkDetail(const std::string& work_id) {
 
     // 开始读取循环
     while (true) {
-        int ret = http_client_->Read(buffer, sizeof(buffer));
+        int ret = client->Read(buffer, sizeof(buffer));
         
         if (ret < 0) {
             ESP_LOGE(TAG, "Failed to read HTTP data: %d", ret);
@@ -762,7 +775,7 @@ bool Esp32Music::FindWorkDetail(const std::string& work_id) {
         }
     }
     
-    http_client_->Close();
+    client->Close();
 
     // 保存数据
     last_downloaded_data_ = response_data;
@@ -832,16 +845,16 @@ WorkInfo Esp32Music::GetWorkInfo(const std::string& work_id) {
     auto http = std::unique_ptr<Http>(ota.SetupHttp());
 
     std::shared_ptr<Http> shared_http = std::move(http);
-    http_client_ = std::static_pointer_cast<HttpClient>(shared_http);
-    http_client_->SetKeepAlive(true); // 启用 Keep-Alive
+    std::shared_ptr<HttpClient> client = std::static_pointer_cast<HttpClient>(shared_http);
+    client->SetKeepAlive(true); // 启用 Keep-Alive
 
-    if (!http_client_->Open("GET", url)) {
+    if (!client->Open("GET", url)) {
         ESP_LOGE(TAG, "Failed to open HTTP connection");
-        http_client_->Close();
+        client->Close();
         return workInfo;
     }
 
-    auto status_code = http_client_->GetStatusCode();
+    auto status_code = client->GetStatusCode();
     if (status_code == 202) {
         return workInfo;
     }
@@ -850,8 +863,8 @@ WorkInfo Esp32Music::GetWorkInfo(const std::string& work_id) {
         return workInfo;
     }
 
-    std::string data = http_client_->ReadAll();
-    http_client_->Close();
+    std::string data = client->ReadAll();
+    client->Close();
     ESP_LOGI(TAG, "response=%s", data.c_str());
 
     cJSON *root = cJSON_Parse(data.c_str());
@@ -1190,7 +1203,7 @@ bool Esp32Music::Download(const std::string& work_name, bool restart) {
 #if 1
                     // 改为静态分配内存
                     if (play_audios_task_stack_ == nullptr) {
-                        play_audios_task_stack_ = (StackType_t*)heap_caps_malloc(3072 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
+                        play_audios_task_stack_ = (StackType_t*)heap_caps_malloc(1024 * 8 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
                         assert(play_audios_task_stack_ != nullptr);
                     }
 
@@ -1200,14 +1213,14 @@ bool Esp32Music::Download(const std::string& work_name, bool restart) {
                     }
 #endif
 #if 0
-                    xTaskCreatePinnedToCore(PlayAudiosTask, "play_audios", 3072, params, 1, &play_audios_task_handle_, 1);
+                    xTaskCreatePinnedToCore(PlayAudiosTask, "play_audios", 1024 * 8, params, 1, &play_audios_task_handle_, 1);
 #endif
 #if 1
                     // 创建播放音频任务
                     play_audios_task_handle_ = xTaskCreateStatic(
                         PlayAudiosTask,
                         "play_audios",
-                        3072,
+                        1024 * 8,
                         params,
                         1,
                         play_audios_task_stack_,
@@ -1407,7 +1420,7 @@ bool Esp32Music::Play2(const std::string& music_url) {
 #if 1
     // 分配PlayAudioTask的静态任务内存
     if (play_audio_task_stack_ == nullptr) {
-        play_audio_task_stack_ = (StackType_t*)heap_caps_malloc(3072 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
+        play_audio_task_stack_ = (StackType_t*)heap_caps_malloc(1024 * 8 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
         assert(play_audio_task_stack_ != nullptr);
         ESP_LOGI(TAG, "Allocated play audio task stack: %p", play_audio_task_stack_);
     }
@@ -1420,14 +1433,14 @@ bool Esp32Music::Play2(const std::string& music_url) {
 #endif
 #if 0
 
-    xTaskCreatePinnedToCore(PlayAudioTask, "play_audio", 3072, param, 1, &play_audio_task_handle_, 1);
+    xTaskCreatePinnedToCore(PlayAudioTask, "play_audio", 1024 * 8, param, 1, &play_audio_task_handle_, 1);
 #endif
 #if 1
     // 创建静态播放音频任务
     play_audio_task_handle_ = xTaskCreateStatic(
         PlayAudioTask,
         "play_audio",
-        3072,
+        1024 * 8,
         param,
         1,
         play_audio_task_stack_,
@@ -1438,7 +1451,7 @@ bool Esp32Music::Play2(const std::string& music_url) {
     assert(play_audio_task_handle_ != nullptr);
 
     play_audio_task_static_allocated_ = true;
-    ESP_LOGI(TAG, "Static play audio task created successfully, stack size: 3072");
+    ESP_LOGI(TAG, "Static play audio task created successfully, stack size: 8192");
     return true;
 }
 
@@ -1499,32 +1512,40 @@ void Esp32Music::ForceStopAllTasks() {
     is_playing_ = false;
     is_lyric_running_ = false;
     
-    // 🔥 关键：通知流式播放已被停止
-    // signalStreamingStopped();
-
-    vTaskDelay(pdMS_TO_TICKS(100));
-
-    // 通知所有等待的线程
+    // 通知所有等待的线程，让播放和下载线程有机会自然退出。
     {
         std::lock_guard<std::mutex> lock(buffer_mutex_);
         buffer_cv_.notify_all();
     }
-    
-    // 删除所有任务句柄（按照依赖顺序）
-    if (download_task_handle_ != nullptr) {
-        if (download_task_static_allocated_) {
-            vTaskDelete(download_task_handle_);
-            download_task_static_allocated_ = false;
-        }
-        download_task_handle_ = nullptr;
+
+    // 先等播放线程自然退出。播放线程退出后会在任务函数末尾设置 is_played，
+    // 这里避免在播放线程仍然持有 buffer_mutex_/pool_mutex_ 时直接删除它。
+    const bool play_finished = WaitForStreamingWorkerFinished(
+        is_played, play_task_handle_, 2000);
+    if (!play_finished && play_task_handle_ != nullptr) {
+        ESP_LOGW(TAG, "Play task did not finish naturally, force deleting");
     }
-    
+
     if (play_task_handle_ != nullptr) {
         if (play_task_static_allocated_) {
             vTaskDelete(play_task_handle_);
             play_task_static_allocated_ = false;
         }
         play_task_handle_ = nullptr;
+    }
+
+    const bool download_finished = WaitForStreamingWorkerFinished(
+        is_downloaded, download_task_handle_, 2000);
+    if (!download_finished && download_task_handle_ != nullptr) {
+        ESP_LOGW(TAG, "Download task did not finish naturally, force deleting");
+    }
+
+    if (download_task_handle_ != nullptr) {
+        if (download_task_static_allocated_) {
+            vTaskDelete(download_task_handle_);
+            download_task_static_allocated_ = false;
+        }
+        download_task_handle_ = nullptr;
     }
 
     // 等待一小段时间确保任务已停止
@@ -1736,11 +1757,12 @@ void Esp32Music::DownloadAudioStreamTask(void* arg) {
     self->DownloadAudioStreamImpl(music_url);
     
     ESP_LOGI(TAG, "DownloadAudioStreamTask finished");
-    self->is_downloaded = true;
 
     // 🔥 关键：通知下载完成
     self->signalDownloadComplete();
 
+    // 发送完成事件后再标记任务结束，避免停止逻辑在任务发信号前就删除它。
+    self->is_downloaded = true;
 
     // vTaskDelete(nullptr);
     while (true) vTaskDelay(portMAX_DELAY);
@@ -1759,18 +1781,19 @@ void Esp32Music::PlayAudioStreamTask(void* arg) {
     auto* self = static_cast<Esp32Music*>(arg);
     self->is_played = false;
     if (self) {
-        self->PlayAudioStreamImpl();
+    self->PlayAudioStreamImpl();
     }
     
     ESP_LOGI(TAG, "PlayAudioStreamTask finished");
-
-    self->is_played = true;
 
     // 🔥 音乐结束后恢复 AEC 参考信号
     Application::GetInstance().GetAudioService().SetBypassAecReference(false);
     
     // 🔥 关键：通知播放完成
     self->signalPlayComplete();
+
+    // 发送完成事件后再标记任务结束，避免停止逻辑在任务发信号前就删除它。
+    self->is_played = true;
 
     // vTaskDelete(nullptr);
     while (true) vTaskDelay(portMAX_DELAY);
@@ -1803,6 +1826,10 @@ bool Esp32Music::StopStreaming() {
     ESP_LOGI(TAG, "Stopping music streaming - current state: downloading=%d, playing=%d", 
             is_downloading_.load(), is_playing_.load());
 
+    // 停止作品级播放循环，这样切换新作品时旧作品不会继续播下一集。
+    is_play_audios_status_ = 0;
+    is_state_completed_ = 2;
+
     // 重置采样率到原始值
     ResetSampleRate();
     
@@ -1811,6 +1838,9 @@ bool Esp32Music::StopStreaming() {
         ESP_LOGW(TAG, "No streaming in progress");
         return true;
     }
+
+    // 停止任务后，清空 AudioService 播放队列，避免旧音频继续从队列输出。
+    Application::GetInstance().GetAudioService().ResetDecoder();
     
     // 停止下载和播放标志
     is_downloading_ = false;
@@ -1822,8 +1852,21 @@ bool Esp32Music::StopStreaming() {
         buffer_cv_.notify_all();
     }
     
-    // 等待任务结束（非阻塞方式）
-    vTaskDelay(pdMS_TO_TICKS(50));
+    // 等播放线程自然结束，而不是在它执行过程中直接删除它。
+    // PlayAudioStream() 退出后会打印播放完成统计，然后任务包装函数
+    // 设置 is_played 并发送 play-complete 事件。
+    const bool play_finished = WaitForStreamingWorkerFinished(
+        is_played, play_task_handle_, 2000);
+    if (!play_finished && play_task_handle_ != nullptr) {
+        ESP_LOGW(TAG, "Play task did not finish naturally, force deleting");
+    }
+
+    // 下载线程可能阻塞在 socket read 上，只等待较短时间。
+    const bool download_finished = WaitForStreamingWorkerFinished(
+        is_downloaded, download_task_handle_, 1000);
+    if (!download_finished && download_task_handle_ != nullptr) {
+        ESP_LOGW(TAG, "Download task did not finish naturally, force deleting");
+    }
     
     // 删除播放任务（处理静态分配）
     if (play_task_handle_ != nullptr) {
@@ -1850,6 +1893,11 @@ bool Esp32Music::StopStreaming() {
         }
         download_task_handle_ = nullptr;
     }
+
+    // 让等待中的 waitForStreamingCompletion 正常返回，老作品的
+    // 播放循环才能结束，新的作品随后可以创建新的播放任务。
+    signalDownloadComplete();
+    signalPlayComplete();
 
     ESP_LOGI(TAG, "Music streaming stop signal sent");
     return true;
@@ -2079,26 +2127,33 @@ void Esp32Music::DownloadAudioStreamImpl(const std::string& music_url) {
     int connection_id = esp_random() % 10000;
     auto http = Board::GetInstance().GetNetwork()->CreateHttp(connection_id);
     std::shared_ptr<Http> shared_http = std::move(http);
-    http_client_ = std::static_pointer_cast<HttpClient>(shared_http);
-    http_client_->SetKeepAlive(true);
+    std::shared_ptr<HttpClient> client = std::static_pointer_cast<HttpClient>(shared_http);
+    client->SetKeepAlive(true);
 
     // 连接辅助函数：offset > 0 时带 Range 请求头续传
     auto connect_http = [&](size_t offset) -> int {
-        http_client_->Close();
-        if (offset > 0) {
-            http_client_->SetHeader("Range", "bytes=" + std::to_string(offset) + "-");
+        for (int attempt = 0; attempt < 3; ++attempt) {
+            client->Close();
+            if (offset > 0) {
+                client->SetHeader("Range", "bytes=" + std::to_string(offset) + "-");
+            }
+
+            ESP_LOGI(TAG, "准备建立 CDN 连接 (尝试 %d/3)", attempt + 1);
+            if (client->Open("GET", music_url)) {
+                return client->GetStatusCode();
+            }
+
+            ESP_LOGW(TAG, "CDN 连接失败，等待后重试 %d/3", attempt + 1);
+            vTaskDelay(pdMS_TO_TICKS(500));
         }
-        if (!http_client_->Open("GET", music_url)) {
-            return -1;
-        }
-        return http_client_->GetStatusCode();
+        return -1;
     };
 
     int status_code = connect_http(0);
     if (status_code != 200 && status_code != 206) {
         ESP_LOGE(TAG, "HTTP GET失败，状态码: %d", status_code);
-        http_client_->Close();
-        http_client_.reset();
+        client->Close();
+        client.reset();
         is_downloading_ = false;
         return;
     }
@@ -2144,7 +2199,7 @@ void Esp32Music::DownloadAudioStreamImpl(const std::string& music_url) {
                     local_downloaded_bytes, elapsed);
         }
 
-        int bytes_read = http_client_->Read(download_buffer_, chunk_size);
+        int bytes_read = client->Read(download_buffer_, chunk_size);
         if (bytes_read < 0) {
             if (retry_count < max_retries) {
                 ESP_LOGW(TAG, "下载中断 (错误码 %d)，尝试断点续传 %d/%d，已下载 %ld 字节",
@@ -2330,8 +2385,8 @@ void Esp32Music::DownloadAudioStreamImpl(const std::string& music_url) {
         taskYIELD();
    }
    
-   http_client_->Close();
-   http_client_.reset();
+   client->Close();
+   client.reset();
    is_downloading_ = false;
    
    // 🔥 下载完成统计
@@ -2466,19 +2521,21 @@ void Esp32Music::PlayAudioStream() {
     while (is_playing_) {
         auto bits = xEventGroupWaitBits(event_group_, PLAY_EVENT_SCHEDULE | WIFI_EVENT_SCHEDULE, pdTRUE, pdFALSE, pdMS_TO_TICKS(10));
 
+        bool process_audio = (bits & PLAY_EVENT_SCHEDULE) != 0;
         if (bits == 0) {
             // 超时：检查是否应该继续
             std::lock_guard<std::mutex> lock(buffer_mutex_);
             if (audio_buffer_.empty() && !is_downloading_) {
                 break; // 无数据且下载结束，退出播放
             }
+            process_audio = !audio_buffer_.empty();
         }
         
         if (bits & WIFI_EVENT_SCHEDULE) {
             break;      // 网络异常
         }
         
-        if (bits & PLAY_EVENT_SCHEDULE) {
+        if (process_audio) {
             total_decode_attempts++;
 
             // 检查设备状态

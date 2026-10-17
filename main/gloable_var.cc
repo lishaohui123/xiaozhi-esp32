@@ -138,7 +138,7 @@ void GloableVar::init_ntp_time() {
     
     // 增加等待时间和重试次数
     int retry = 0;
-    const int retry_count = 15;  // 增加重试次数
+    const int retry_count = 5;  // 增加重试次数
     bool sync_success = false;
     
     while (retry < retry_count) {

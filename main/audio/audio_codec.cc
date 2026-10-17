@@ -150,6 +150,12 @@ void AudioCodec::EnableInput(bool enable) {
 }
 
 void AudioCodec::EnableOutput(bool enable) {
+    if (enable) {
+        SPK_EN_IO15(1);
+    } else {
+        SPK_EN_IO15(0);
+    }
+  
     if (enable == output_enabled_) {
         return;
     }

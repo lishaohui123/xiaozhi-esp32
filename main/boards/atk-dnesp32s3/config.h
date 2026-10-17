@@ -54,7 +54,7 @@
 #define DISPLAY_RESET_PIN   GPIO_NUM_47
 
 // SPI 时钟 20MHz（与 esp32-cgc 一致）
-#define DISPLAY_SPI_SCLK_HZ     (20 * 1000 * 1000)
+#define DISPLAY_SPI_SCLK_HZ     (40 * 1000 * 1000)
 #define DISPLAY_SPI_MODE        0
 
 // 兼容旧宏

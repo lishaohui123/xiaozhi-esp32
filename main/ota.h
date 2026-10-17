@@ -34,6 +34,8 @@ public:
 	std::unique_ptr<Http> SetupHttp();
 
     esp_err_t SendActivationCode(const std::string& deviceId, const std::string& blue_device, const std::string& board_id);
+    esp_err_t SendUserActivation(const std::string& deviceId, const std::string& blue_device, const std::string& board_id);
+    
 private:
     std::string activation_message_;
     std::string activation_code_;

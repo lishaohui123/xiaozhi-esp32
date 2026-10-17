@@ -151,6 +151,11 @@ VoiceCall::VoiceCall() {
     m_phone_call_tcb_ = nullptr;
     m_phone_call_task_handle_ = nullptr;
 
+    m_incoming_call_stack_ = nullptr;
+    m_incoming_call_tcb_ = nullptr;
+    m_incoming_call_task_handle_ = nullptr;
+    incoming_call_payload_.clear();
+
     // UDP状态初始化
     m_udp_receive_task_running = false;
     m_udp_send_task_running = false;
@@ -224,6 +229,15 @@ VoiceCall::~VoiceCall() {
     if (m_phone_call_tcb_ != nullptr) {
         heap_caps_free(m_phone_call_tcb_);
         m_phone_call_tcb_ = nullptr;
+    }
+    // 释放来电异步任务的内存
+    if (m_incoming_call_stack_ != nullptr) {
+        heap_caps_free(m_incoming_call_stack_);
+        m_incoming_call_stack_ = nullptr;
+    }
+    if (m_incoming_call_tcb_ != nullptr) {
+        heap_caps_free(m_incoming_call_tcb_);
+        m_incoming_call_tcb_ = nullptr;
     }
 }
 
@@ -726,6 +740,13 @@ void VoiceCall::SetWebsocketSendAudio() {
     xEventGroupSetBits(event_group_, WEBSOCKET_SEND_AUDIO);
 }
 
+void VoiceCall::ScheduleMqttHandler(void (VoiceCall::*handler)(const char*), const char* payload) {
+    std::string payload_copy = payload ? payload : "";
+    Application::GetInstance().Schedule([this, handler, payload_copy]() {
+        (this->*handler)(payload_copy.c_str());
+    });
+}
+
 void VoiceCall::handle_mqtt_message(const char* topic, const char* payload, int payload_len) {
     if (!topic || !payload) {
         ESP_LOGE(TAG, "Invalid MQTT message");
@@ -738,56 +759,56 @@ void VoiceCall::handle_mqtt_message(const char* topic, const char* payload, int 
     char device_call_request_topic[64];
     snprintf(device_call_request_topic, sizeof(device_call_request_topic), MQTT_TOPIC_DEVICE_CALL_REQUEST, m_device_info.device_id.c_str());
     if (strcmp(topic, device_call_request_topic) == 0) {
-        handle_incoming_call(payload);
+        handle_incoming_call_async(payload);
         return;
     }
 
     char device_alarm_topic[64];
     snprintf(device_alarm_topic, sizeof(device_alarm_topic), TOPIC_DEVICE_ALARM_TEMPLATE, m_device_info.device_id.c_str());
     if (strcmp(topic, device_alarm_topic) == 0) {
-        handle_device_alarm(payload);
+        ScheduleMqttHandler(&VoiceCall::handle_device_alarm, payload);
         return;
     }
 
     char device_works_topic[64];
     snprintf(device_works_topic, sizeof(device_works_topic), TOPIC_DEVICE_WORKS_TEMPLATE, m_device_info.device_id.c_str());
     if (strcmp(topic, device_works_topic) == 0) {
-        handle_device_works(payload);
+        ScheduleMqttHandler(&VoiceCall::handle_device_works, payload);
         return;
     }
 
     char device_audio_topic[64];
     snprintf(device_audio_topic, sizeof(device_audio_topic), TOPIC_DEVICE_AUDIO_TEMPLATE, m_device_info.device_id.c_str());
     if (strcmp(topic, device_audio_topic) == 0) {
-        handle_device_audio(payload);
+        ScheduleMqttHandler(&VoiceCall::handle_device_audio, payload);
         return;
     }
 
     char social_hd_topic[64];
     snprintf(social_hd_topic, sizeof(social_hd_topic), TOPIC_SOCIAL_HD_TEMPLATE, m_device_info.device_id.c_str());
     if (strcmp(topic, social_hd_topic) == 0) {
-        handle_social_hd(payload);
+        ScheduleMqttHandler(&VoiceCall::handle_social_hd, payload);
         return;
     }
 
     char device_set_topic[64];
     snprintf(device_set_topic, sizeof(device_set_topic), TOPIC_DEVICE_SET_TEMPLATE, m_device_info.device_id.c_str());
     if (strcmp(topic, device_set_topic) == 0) {
-        handle_device_set(payload);
+        ScheduleMqttHandler(&VoiceCall::handle_device_set, payload);
         return;
     }
 
     char device_update_topic[64];
     snprintf(device_update_topic, sizeof(device_update_topic), TOPIC_DEVICE_UPDATE_TEMPLATE, m_device_info.device_id.c_str());
     if (strcmp(topic, device_update_topic) == 0) {
-        handle_device_update(payload);
+        ScheduleMqttHandler(&VoiceCall::handle_device_update, payload);
         return;
     }
 
     char device_raisingsim_topic[64];   
     snprintf(device_raisingsim_topic, sizeof(device_raisingsim_topic), TOPIC_DEVICE_RAISINGSIM_TEMPLATE, m_device_info.device_id.c_str());
     if (strcmp(topic, device_raisingsim_topic) == 0) {
-        handle_device_raisingsim(payload);
+        ScheduleMqttHandler(&VoiceCall::handle_device_raisingsim, payload);
         return;
     }
 
@@ -907,6 +928,58 @@ void VoiceCall::handle_incoming_call(const char* payload) {
     }
 }
 
+void VoiceCall::handle_incoming_call_async(const char* payload) {
+    if (m_incoming_call_task_handle_ != nullptr) {
+        eTaskState task_state = eTaskGetState(m_incoming_call_task_handle_);
+        // 上一个来电任务处理完会进入 portMAX_DELAY 阻塞状态，此时可以安全复用。
+        if (task_state == eBlocked || task_state == eSuspended) {
+            vTaskDelete(m_incoming_call_task_handle_);
+            m_incoming_call_task_handle_ = nullptr;
+        } else {
+            // 上一个来电还在处理，把本次请求交给主循环按“忙线”处理，避免删掉运行中的任务。
+            std::string payload_copy = payload ? payload : "";
+            Application::GetInstance().Schedule([this, payload_copy]() {
+                handle_incoming_call(payload_copy.c_str());
+            });
+            return;
+        }
+    }
+
+    if (m_incoming_call_stack_ == nullptr) {
+        m_incoming_call_stack_ = (StackType_t*)heap_caps_malloc(
+            INCOMING_CALL_STACK_SIZE * sizeof(StackType_t),
+            MALLOC_CAP_SPIRAM
+        );
+        assert(m_incoming_call_stack_ != nullptr);
+    }
+
+    if (m_incoming_call_tcb_ == nullptr) {
+        m_incoming_call_tcb_ = (StaticTask_t*)heap_caps_malloc(
+            sizeof(StaticTask_t),
+            MALLOC_CAP_INTERNAL
+        );
+        assert(m_incoming_call_tcb_ != nullptr);
+    }
+
+    incoming_call_payload_ = payload ? payload : "";
+
+    m_incoming_call_task_handle_ = xTaskCreateStatic(
+        [](void* arg) {
+            VoiceCall* inst = (VoiceCall*)arg;
+            inst->handle_incoming_call(inst->incoming_call_payload_.c_str());
+            while (true) vTaskDelay(portMAX_DELAY);
+        },
+        "incoming_call",
+        INCOMING_CALL_STACK_SIZE,
+        this,
+        2,
+        m_incoming_call_stack_,
+        m_incoming_call_tcb_
+    );
+
+    assert(m_incoming_call_task_handle_ != nullptr);
+}
+
 /*******************************
  * 通话时轮询通话的状态，结束通话
  *******************************/
@@ -970,6 +1043,7 @@ void VoiceCall::handle_device_works(const char* payload) {
     }
     else {
         auto music = Board::GetInstance().GetMusic();
+        music->StopStreaming();
         music->Download(work_name, false);
     }
 }
@@ -1000,6 +1074,7 @@ void VoiceCall::handle_device_audio(const char* payload) {
     }
     else {
         auto music = Board::GetInstance().GetMusic();
+        music->StopStreaming();
         music->Play2(audio_url);
     }
 }

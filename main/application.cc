@@ -141,6 +141,8 @@ void Application::Initialize() {
     SPK_EN(1);
 
     // 电池使能和充电电流的限制
+    SPK_EN_IO15(1);
+
     SPK_EN_IO5(1);
     SPK_EN_IO17(1);
 
@@ -564,6 +566,10 @@ void Application::CheckNewVersion() {
         // No new version, mark the current version as valid
         ota_->MarkCurrentVersionValid();
         if (!ota_->HasActivationCode() && !ota_->HasActivationChallenge()) {
+            if (blue_device != "") {
+                ota_->SendUserActivation(SystemInfo::GetMacAddress(), blue_device, board_id);
+            }
+                      
             // Exit the loop if done checking new version
             break;
         }
@@ -581,6 +587,11 @@ void Application::CheckNewVersion() {
                 alarm_manager.PlayTtsAudioStreamVoice(s, 3);
 
                 ESP_LOGE(TAG, "请重新进行蓝牙配网");
+            }
+        }
+        else {
+            if (blue_device != "") {
+                ota_->SendUserActivation(SystemInfo::GetMacAddress(), blue_device, board_id);
             }
         }
 

@@ -512,3 +512,36 @@ esp_err_t Ota::SendActivationCode(const std::string& deviceId, const std::string
     ESP_LOGI(TAG, "Send activation code successful");
     return ESP_OK;
 }
+
+// 这个接口用于不在小智官方激活时的接口调用，这里设备自动绑定到用户的名下
+esp_err_t Ota::SendUserActivation(const std::string& deviceId, const std::string& blue_device, const std::string& board_id) {
+    std::string url = OTA_URI;
+    if (url.back() != '/') {
+        url += "/device/user/bind?deviceId=" + deviceId + "&blueYaId=" + blue_device + "&boardId=" + board_id + "&product=" + PRODUCT + + "&subProduct=" + SUB_PRODUCT;
+    } else {
+        url += "device/user/bind?deviceId=" + deviceId + "&blueYaId=" + blue_device + "&boardId=" + board_id + "&product=" + PRODUCT + + "&subProduct=" + SUB_PRODUCT;
+    }
+
+    auto http = std::unique_ptr<Http>(SetupHttp());
+
+    std::shared_ptr<Http> shared_http = std::move(http);
+    http_client_ = std::static_pointer_cast<HttpClient>(shared_http);
+    http_client_->SetKeepAlive(true); // 启用 Keep-Alive
+
+    if (!http_client_->Open("GET", url)) {
+        ESP_LOGE(TAG, "Failed to open HTTP connection");
+        return ESP_FAIL;
+    }
+    
+    auto status_code = http_client_->GetStatusCode();
+    if (status_code == 202) {
+        return ESP_ERR_TIMEOUT;
+    }
+    if (status_code != 200) {
+        ESP_LOGE(TAG, "Failed to send activate code, code: %d, body: %s", status_code, http_client_->ReadAll().c_str());
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "Send activation code successful");
+    return ESP_OK;
+}

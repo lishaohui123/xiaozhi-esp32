@@ -198,11 +198,17 @@ private:
     // 处理MQTT消息
     void handle_mqtt_message(const char* topic, const char* payload, int payload_len);
 
+    // 把需要阻塞/耗时操作的 MQTT 消息投递到主循环处理，避免压爆 mqtt_task 栈
+    void ScheduleMqttHandler(void (VoiceCall::*handler)(const char*), const char* payload);
+
     // 发送MQTT消息
     esp_err_t send_mqtt_message(const char *topic, const char *payload);
 
     // 处理来电
     void handle_incoming_call(const char* payload);
+
+    // 处理来电（异步，避免阻塞 MQTT 任务栈）
+    void handle_incoming_call_async(const char* payload);
     
     // 处理通话结束
     void handle_call_end();
@@ -307,6 +313,12 @@ private:
     StaticTask_t* m_phone_call_tcb_;
     TaskHandle_t m_phone_call_task_handle_;
 
+    // 来电异步任务的静态分配相关成员
+    static constexpr uint32_t INCOMING_CALL_STACK_SIZE = 8192;
+    StackType_t* m_incoming_call_stack_;
+    StaticTask_t* m_incoming_call_tcb_;
+    TaskHandle_t m_incoming_call_task_handle_;
+
     // socket事件组
     EventGroupHandle_t event_group_ = nullptr;
 
@@ -314,6 +326,7 @@ private:
     bool websocket_reconnect_failed_;
 
     std::string phone_member_;
+    std::string incoming_call_payload_;
 };
 
 #endif // VOICE_CALL_H
