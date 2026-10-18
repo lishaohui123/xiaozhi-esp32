@@ -239,10 +239,10 @@ private:
     void regenerate_verification_code();
 
     // 妙月的天枢平台提供的UDP发送音频祯
-    void send_audio_frame(int sockfd, uint32_t sample_rate, uint8_t  channels, uint64_t timestamp, const uint8_t* audio_data, size_t audio_size);
+    bool send_audio_frame(int sockfd, uint32_t sample_rate, uint8_t  channels, uint64_t timestamp, const uint8_t* audio_data, size_t audio_size);
 
     // 妙月的天枢平台提供的UDP发送包
-    void send_packet(int sockfd, const CustomHeader* header, const uint8_t* rtp_data, int data_len);
+    bool send_packet(int sockfd, const CustomHeader* header, const uint8_t* rtp_data, int data_len);
 
     bool parse_packet(const uint8_t* data, size_t len, CustomHeader* header, uint8_t** payload);
 

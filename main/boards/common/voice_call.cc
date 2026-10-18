@@ -1353,22 +1353,45 @@ void VoiceCall::udp_send_task() {
     inet_pton(AF_INET, m_call_info.server_ip.c_str(), &server_addr_.sin_addr);
 
     long packets = 0;
+    constexpr size_t kMaxVoiceSendBacklog = 3;
+    const TickType_t kSendIntervalTicks = pdMS_TO_TICKS(OPUS_FRAME_DURATION_MS);
+
     while (m_udp_send_task_running) {
-        auto bits = xEventGroupWaitBits(event_group_, WEBSOCKET_SEND_AUDIO, pdTRUE, pdFALSE, pdMS_TO_TICKS(20));
+        auto bits = xEventGroupWaitBits(
+            event_group_, WEBSOCKET_SEND_AUDIO,
+            pdTRUE, pdFALSE, kSendIntervalTicks);
 
-        if (bits & WEBSOCKET_SEND_AUDIO) {
-            while (auto packet = application.GetAudioService().PopPacketFromSendQueue()) {
-                send_audio_frame(client_sock_, packet->sample_rate, 1, packet->timestamp, packet->payload.data(), packet->payload.size());
+        if (!(bits & WEBSOCKET_SEND_AUDIO)) {
+            continue;
+        }
 
-                // 每发送一帧后稍微喘息，让网络栈有时间处理
-                vTaskDelay(pdMS_TO_TICKS(1));
+        auto& audio_service = application.GetAudioService();
 
-                packets++;
-                if (packets % 50 == 0) {
-                    ESP_LOGI(TAG, "udp_send_task send UDP packet %d", packets);
-                }
-            }
-        } 
+        // 保持实时：积压超过 3 帧时直接丢弃最旧的数据。
+        while (audio_service.GetSendQueueSize() > kMaxVoiceSendBacklog) {
+            audio_service.PopPacketFromSendQueue();
+        }
+
+        auto packet = audio_service.PopPacketFromSendQueue();
+        if (!packet) {
+            continue;
+        }
+
+        bool sent = send_audio_frame(
+            client_sock_, packet->sample_rate, 1,
+            packet->timestamp, packet->payload.data(), packet->payload.size());
+
+        packets++;
+        if (packets % 50 == 0) {
+            ESP_LOGI(TAG, "udp_send_task send UDP packet %d", packets);
+        }
+
+        if (!sent) {
+            // send_packet 已经对 ENOMEM/EAGAIN 做了退避，直接继续。
+            continue;
+        }
+
+        vTaskDelay(kSendIntervalTicks);
     }
 
     ESP_LOGI(TAG, "UDP sending task exiting");
@@ -1431,7 +1454,7 @@ void VoiceCall::regenerate_verification_code() {
     ESP_LOGI(TAG, "Verification code regenerated: %s",  m_device_info.verification_code.c_str());
 }
 
-void VoiceCall::send_audio_frame(int sockfd, uint32_t sample_rate, uint8_t  channels, uint64_t timestamp, const uint8_t* audio_data, size_t audio_size) {
+bool VoiceCall::send_audio_frame(int sockfd, uint32_t sample_rate, uint8_t  channels, uint64_t timestamp, const uint8_t* audio_data, size_t audio_size) {
     CustomHeader header = {
         .mac = {0 }, // 替换设备MAC地址
         .token = {0 },
@@ -1459,10 +1482,10 @@ void VoiceCall::send_audio_frame(int sockfd, uint32_t sample_rate, uint8_t  chan
 
     // memcpy(header.token, m_call_info.roomToken.c_str(), m_call_info.roomToken.size());
 
-    send_packet(sockfd, &header, audio_data, audio_size);
+    return send_packet(sockfd, &header, audio_data, audio_size);
 }
 
-void VoiceCall::send_packet(int sockfd, const CustomHeader* header, const uint8_t* rtp_data, int data_len) {
+bool VoiceCall::send_packet(int sockfd, const CustomHeader* header, const uint8_t* rtp_data, int data_len) {
 
     // if (!g_client_addr_valid) {
     //     return;
@@ -1507,14 +1530,18 @@ void VoiceCall::send_packet(int sockfd, const CustomHeader* header, const uint8_
         int ret = sendto(sockfd, send_buf, actual_len, 0, (struct sockaddr*)&server_addr_, sizeof(server_addr_));
 
         if (ret < 0) {
-            perror("send fail");
-        } else {
-            if (net_header.payload_type == 0) {
-                //printf("Sent frag %d/%d, size=%d\n", frag_idx+1, total_frags, ret);
+            int send_errno = errno;
+            if (send_errno == ENOMEM || send_errno == ENOBUFS ||
+                send_errno == EAGAIN || send_errno == EWOULDBLOCK) {
+                ESP_LOGW(TAG, "UDP send backlogged (errno=%d), dropping packet", send_errno);
+                vTaskDelay(pdMS_TO_TICKS(10));
+            } else {
+                ESP_LOGE(TAG, "UDP send failed (errno=%d)", send_errno);
             }
+            return false;
         }
     }
-    // pthread_mutex_unlock(&queue_mutex_);
+    return true;
 }
 
 /* 解析数据包（线程安全）*/
