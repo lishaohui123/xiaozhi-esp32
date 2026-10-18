@@ -141,7 +141,9 @@ void Application::Initialize() {
     SPK_EN(1);
 
     // 电池使能和充电电流的限制
-    SPK_EN_IO15(1);
+    // SPK_EN_IO15(1);
+    iot->LED_RED_init();
+    LED_RED(1);
 
     SPK_EN_IO5(1);
     SPK_EN_IO17(1);
