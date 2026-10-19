@@ -605,6 +605,13 @@ void VoiceCall::make_call(std::string member) {
         application.GetAudioService().EnableVoiceProcessing(false);
         ESP_LOGI(TAG, "Audio input enabled successfully");
     }
+
+    {
+        // 为了快速的响应用户的打电话请求
+        std::string s = std::format("好嘞，小主人，正在给 {} 打电话，请稍后！", member);
+        auto& alarm_manager = AlarmManager::GetInstance();
+        alarm_manager.PlayTtsAudioStreamVoice(s, 1);
+    }
         
     {
         // 1、调用后端接口获取拨打对象(爸爸、妈妈)的微信id；
@@ -625,13 +632,6 @@ void VoiceCall::make_call(std::string member) {
         }
 
         m_call_info.parent_openid = chat_rel.chat_id;
-    }
-
-    {
-        // 为了快速的响应用户的打电话请求
-        std::string s = std::format("好嘞，小主人，正在给 {} 打电话，请稍后！", member);
-        auto& alarm_manager = AlarmManager::GetInstance();
-        alarm_manager.PlayTtsAudioStreamVoice(s, 1);
     }
   
     {
@@ -1044,6 +1044,14 @@ void VoiceCall::handle_device_works(const char* payload) {
     else {
         auto music = Board::GetInstance().GetMusic();
         music->StopStreaming();
+
+        // 增加语音播放，来提升用户体验
+        {
+            std::string s = "小主人，马上为你播放 " + work_name;
+            auto& alarm_manager = AlarmManager::GetInstance();
+            alarm_manager.PlayTtsAudioStreamVoice(s, 1);
+        }
+
         music->Download(work_name, false);
     }
 }

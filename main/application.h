@@ -208,6 +208,8 @@ private:
 
     void InitializeMqtt();
 
+    void StartTask(void *arg);
+        
     void StartupCorpus();
 
     void SW_Vibrating_init(void);

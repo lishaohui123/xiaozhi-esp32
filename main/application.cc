@@ -446,6 +446,15 @@ void Application::ActivationTask() {
     // Initialize the protocol
     InitializeProtocol();
 
+    // 为了加快启动速度，把这些功能放在线程中
+    xTaskCreate([](void* arg) {
+        auto this_ = (Application*)arg;
+        this_->StartTask(arg);
+        vTaskDelete(NULL);
+    }, "start_task", 1024 * 8, this, 3, nullptr);
+
+
+#if 0   // 为了加快启动速度，把这些功能放在线程中
     SW_Vibrating_init();
 
     InitializeDebounceTouchThread();
@@ -456,11 +465,27 @@ void Application::ActivationTask() {
     TOUCH_3_init();
 
     InitializeMqtt();
+#endif
 
     StartupCorpus();
 
     // Signal completion to main loop
     xEventGroupSetBits(event_group_, MAIN_EVENT_ACTIVATION_DONE);
+}
+
+void Application::StartTask(void *arg) {
+    Application* application = static_cast<Application*>(arg);
+
+    application->SW_Vibrating_init();
+
+    application->InitializeDebounceTouchThread();
+    application->InitializeTouchThread();
+
+    application->TOUCH_1_init();
+    application->TOUCH_2_init();
+    application->TOUCH_3_init();
+
+    application->InitializeMqtt();
 }
 
 void Application::CheckAssetsVersion() {
