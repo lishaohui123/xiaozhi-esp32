@@ -1611,10 +1611,12 @@ void Application::ResetProtocol() {
     });
 }
 
-void Application::AddAudioData(AudioStreamPacket&& packet) {
+void Application::AddAudioData(AudioStreamPacket&& packet, bool allow_during_conversation) {
     // 检查设备状态和编解码器状态
     auto codec = Board::GetInstance().GetAudioCodec();
-    if (!codec || state_machine_.GetState() != kDeviceStateIdle || !codec->output_enabled()) {
+    if (!codec ||
+        (state_machine_.GetState() != kDeviceStateIdle && !allow_during_conversation) ||
+        !codec->output_enabled()) {
         ESP_LOGD(TAG, "Skip audio data: device state=%d, codec output=%s", 
                 state_machine_.GetState(), codec->output_enabled() ? "enabled" : "disabled");
         return;

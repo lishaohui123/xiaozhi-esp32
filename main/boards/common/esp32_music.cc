@@ -20,6 +20,7 @@
 #include <freertos/task.h>
 #include <esp_err.h>
 #include "constants.h"
+#include "alarm_manager.h"
 
 #define TAG "Esp32Music"
 
@@ -62,7 +63,7 @@ static std::string url_encode(const std::string& str) {
     
     for (size_t i = 0; i < str.length(); i++) {
         unsigned char c = str[i];
-        
+
         if ((c >= 'A' && c <= 'Z') ||
             (c >= 'a' && c <= 'z') ||
             (c >= '0' && c <= '9') ||
@@ -91,6 +92,7 @@ Esp32Music::Esp32Music() :
     is_lyric_running_(false),
     is_playing_(false), 
     is_downloading_(false), 
+    prompt_playback_mode_(false),
     is_state_completed_(0),
     is_play_audios_status_(0),
     current_play_time_ms_(0),
@@ -1255,6 +1257,98 @@ bool Esp32Music::Download(const std::string& work_name, bool restart) {
     return false;
 }
 
+/****************************************
+ * 为了加速点播的速度，小程序直接
+ * 发送的是音频的url
+ ****************************************/
+bool Esp32Music::Download(const std::string& work_id, std::vector<AudioInfo> audios, bool restart) {
+    if (audios.size() != 0) {
+        // 查询当前作品讲到了第几集
+        int cur = 0;
+        if (audios.size() > 1) {
+            if (!restart) {
+                WorkInfo workInfo = GetWorkInfo(work_id);
+                std::string audio_id = workInfo.audioId;
+                int32_t completed = workInfo.completed;
+
+                if (!audio_id.empty()) {
+                    for (int32_t i = 0; i < audios.size();  i++) {
+                        if (audio_id == audios.at(i).id) {
+                            if ((i == (audios.size() - 1)) && (completed == 1)) {
+                                // 最后一集讲完，从头开始讲
+                                cur = 0;
+                                break;
+                            }
+                            cur = i;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        ESP_LOGI(TAG, "作品第几集 %d", cur);
+
+        // 把讲故事交给一个线程
+        PlayAudiosTaskParams* params = new PlayAudiosTaskParams{
+            this, work_id, audios, cur
+        };
+
+        /******************************************
+         * 如果处于音频播放，则结束播放
+         *******************************************/
+        StopWorksAudio();
+
+        // 停止之前的音频播放任务（如果有）
+        if (play_audios_task_handle_ != nullptr) {
+            if (play_audios_task_static_allocated_) {
+                vTaskDelete(play_audios_task_handle_);
+                play_audios_task_static_allocated_ = false;
+                ESP_LOGI(TAG, "Deleted previous static play audio task");
+            }
+            play_audios_task_handle_ = nullptr;
+        }
+#if 1
+        // 改为静态分配内存
+        if (play_audios_task_stack_ == nullptr) {
+            play_audios_task_stack_ = (StackType_t*)heap_caps_malloc(1024 * 8 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
+            assert(play_audios_task_stack_ != nullptr);
+        }
+
+        if (play_audios_task_tcb_ == nullptr) {
+            play_audios_task_tcb_ = (StaticTask_t*)heap_caps_malloc(sizeof(StaticTask_t), MALLOC_CAP_INTERNAL);
+            assert(play_audios_task_tcb_ != nullptr);
+        }
+#endif
+#if 0
+        xTaskCreatePinnedToCore(PlayAudiosTask, "play_audios", 1024 * 8, params, 1, &play_audios_task_handle_, 1);
+#endif
+#if 1
+        // 创建播放音频任务
+        play_audios_task_handle_ = xTaskCreateStatic(
+            PlayAudiosTask,
+            "play_audios",
+            1024 * 8,
+            params,
+            1,
+            play_audios_task_stack_,
+            play_audios_task_tcb_
+        );
+#endif
+        assert(play_audios_task_handle_ != nullptr);
+
+        play_audios_task_static_allocated_ = true;
+        ESP_LOGI(TAG, "Static play audios task created successfully");
+        return true;
+    }
+    else {
+        ESP_LOGE(TAG, "作品下面没有音频");
+        return false;
+    }
+
+    return false;
+}
+
 /**************************************
  * 允许接收通过url来调用，进行
  * 语音的播报
@@ -1571,6 +1665,15 @@ void Esp32Music::ResetMemoryPool() {
     ESP_LOGI(TAG, "Memory pool reset");
 }
 
+bool Esp32Music::StartStreamingPrompt(const std::string& music_url) {
+    prompt_playback_mode_ = true;
+    bool ok = StartStreaming(music_url);
+    if (!ok) {
+        prompt_playback_mode_ = false;
+    }
+    return ok;
+}
+
 /****************************************************
  * 开始流式播放，只要一个url，返回的
  * mp3流
@@ -1829,6 +1932,7 @@ bool Esp32Music::StopStreaming() {
     // 停止作品级播放循环，这样切换新作品时旧作品不会继续播下一集。
     is_play_audios_status_ = 0;
     is_state_completed_ = 2;
+    prompt_playback_mode_ = false;
 
     // 重置采样率到原始值
     ResetSampleRate();
@@ -2543,13 +2647,14 @@ void Esp32Music::PlayAudioStream() {
             DeviceState current_state = app.GetDeviceState();
 
             // 等小智把话说完了，变成聆听状态之后，马上转成待机状态，进入音乐播放
-            if (current_state != kDeviceStateIdle) {
+            if (current_state != kDeviceStateIdle && !prompt_playback_mode_) {
                 ESP_LOGI(TAG, "⚠️ 检测到小智被唤醒 (状态: %d)，停止音乐播放", current_state);
         
                 // 在播放状态下，小智被唤醒，停止下载和播放
                 is_playing_ = false;
                 is_downloading_ = false;
                 is_state_completed_ = 2;
+                prompt_playback_mode_ = false;
                 
                 // 打印中断时的统计
                 auto interrupt_time = std::chrono::steady_clock::now();
@@ -2559,7 +2664,7 @@ void Esp32Music::PlayAudioStream() {
             }
 
             // 在正常的播放状态下
-            if (current_state == kDeviceStateIdle) {
+            if (current_state == kDeviceStateIdle || prompt_playback_mode_) {
                 is_state_completed_ = 1;
                 codec->EnableOutput(true);
                 Application::GetInstance().GetAudioService().is_voice_out_ = true;
@@ -2777,7 +2882,7 @@ void Esp32Music::PlayAudioStream() {
                     packet->payload.resize(pcm_size_bytes);
                     memcpy(packet->payload.data(), final_pcm_data, pcm_size_bytes);
 
-                    Application::GetInstance().AddAudioData(std::move(*packet));
+                    Application::GetInstance().AddAudioData(std::move(*packet), prompt_playback_mode_);
                     total_played += pcm_size_bytes;
                     
                     ESP_LOGD(TAG, "发送PCM数据到Application - 总播放: %d 字节", total_played);
@@ -2836,7 +2941,7 @@ void Esp32Music::PlayAudioStream() {
 
     // ================== 关键修改：刷新残留数据 ==================
     ESP_LOGI(TAG, "主循环结束，剩余未解码数据: %d 字节", bytes_left);
-    if (bytes_left > 0 && is_playing_ && !(Application::GetInstance().GetDeviceState() != kDeviceStateIdle)) {
+    if (bytes_left > 0 && is_playing_ && (prompt_playback_mode_ || Application::GetInstance().GetDeviceState() == kDeviceStateIdle)) {
         ESP_LOGI(TAG, "开始刷新残留MP3数据（防止末尾丢失）");
         int flush_attempts = 0;
         while (bytes_left > 0 && flush_attempts < 100) {
@@ -2872,7 +2977,7 @@ void Esp32Music::PlayAudioStream() {
                         size_t pcm_bytes = final_sample_count * sizeof(int16_t);
                         pkt->payload.resize(pcm_bytes);
                         memcpy(pkt->payload.data(), final_pcm_data, pcm_bytes);
-                        Application::GetInstance().AddAudioData(std::move(*pkt));
+                        Application::GetInstance().AddAudioData(std::move(*pkt), prompt_playback_mode_);
                         FreeAudioPacket(pkt);
                         total_played += pcm_bytes;
                         total_decode_success++;
@@ -2935,6 +3040,7 @@ void Esp32Music::PlayAudioStream() {
     ESP_LOGI(TAG, "9. 播放状态: %d", is_state_completed_.load());
     ESP_LOGI(TAG, "=========================================");
     
+    prompt_playback_mode_ = false;
     Application::GetInstance().GetAudioService().is_voice_out_ = false;
     is_playing_ = false;
     

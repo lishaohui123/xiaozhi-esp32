@@ -315,6 +315,17 @@ void McpServer::AddCommonTools() {
     *************************************/
     auto music = board.GetMusic();
     if (music) {
+        auto play_tts_without_ending_conversation = [music](const std::string& text, int timeout_ms = 30000) {
+            auto& alarm_manager = AlarmManager::GetInstance();
+            music->StartStreamingPrompt(alarm_manager.GetTtsStreamUrl(text));
+
+            int waited = 0;
+            while ((music->IsPlaying() || music->IsDownloading()) && waited < timeout_ms) {
+                vTaskDelay(pdMS_TO_TICKS(20));
+                waited += 20;
+            }
+        };
+
         /*******************************************
          * 我们接入了上海童锐的正版内容
          *******************************************/
@@ -389,8 +400,9 @@ void McpServer::AddCommonTools() {
             PropertyList({
                 Property("song_name", kPropertyTypeString)
             }),
-            [music](const PropertyList& properties) -> ReturnValue {
+            [music, play_tts_without_ending_conversation](const PropertyList& properties) -> ReturnValue {
                 auto song_name = properties["song_name"].value<std::string>();
+                play_tts_without_ending_conversation("好嘞小主人，我先去歌曲库里瞅瞅是否有" + song_name + "，请耐心等待一下噢");
                 if (!music->Download(song_name, false)) {
                     return "{\"success\": false, \"message\": \"获取音乐资源失败\"}";
                 }
@@ -406,8 +418,9 @@ void McpServer::AddCommonTools() {
             PropertyList({
                 Property("name", kPropertyTypeString)
             }),
-            [music](const PropertyList& properties) -> ReturnValue {
+            [music, play_tts_without_ending_conversation](const PropertyList& properties) -> ReturnValue {
                 std::string name = properties["name"].value<std::string>();
+                play_tts_without_ending_conversation("好嘞小主人，我先去国学库里瞅瞅是否有" + name + "，请耐心等待一下噢");
                 if (!music->Download(name, false)) {
                     return "{\"success\": false, \"message\": \"未找到国学作品: " + name + "\"}";
                 }
@@ -423,8 +436,9 @@ void McpServer::AddCommonTools() {
             PropertyList({
                 Property("story_name", kPropertyTypeString)
             }),
-            [music](const PropertyList& properties) -> ReturnValue {
+            [music, play_tts_without_ending_conversation](const PropertyList& properties) -> ReturnValue {
                 auto story_name = properties["story_name"].value<std::string>();
+                play_tts_without_ending_conversation("好嘞小主人，我先去故事库里瞅瞅是否有" + story_name + "，请耐心等待一下噢");
                 if (!music->Download(story_name, false)) {
                     return "{\"success\": false, \"message\": \"在故事库中未找到'" + story_name + "'这个故事，请确认故事名称是否正确\"}";
                 }
@@ -440,8 +454,9 @@ void McpServer::AddCommonTools() {
             PropertyList({
                 Property("song_name", kPropertyTypeString)
             }),
-            [music](const PropertyList& properties) -> ReturnValue {
+            [music, play_tts_without_ending_conversation](const PropertyList& properties) -> ReturnValue {
                 auto song_name = properties["song_name"].value<std::string>();
+                play_tts_without_ending_conversation("好嘞小主人，我重新去找找" + song_name + "，请稍等一下噢");
                 if (!music->Download(song_name, true)) {
                     return "{\"success\": false, \"message\": \"重新获取儿歌资源失败\"}";
                 }
@@ -457,8 +472,9 @@ void McpServer::AddCommonTools() {
             PropertyList({
                 Property("story_name", kPropertyTypeString)
             }),
-            [music](const PropertyList& properties) -> ReturnValue {
+            [music, play_tts_without_ending_conversation](const PropertyList& properties) -> ReturnValue {
                 auto story_name = properties["story_name"].value<std::string>();
+                play_tts_without_ending_conversation("好嘞小主人，我重新去找找" + story_name + "，请稍等一下噢");
                 if (!music->Download(story_name, true)) {
                     return "{\"success\": false, \"message\": \"重新获取故事内容失败\"}";
                 }

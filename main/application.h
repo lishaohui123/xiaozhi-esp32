@@ -157,7 +157,7 @@ public:
 #if 1
     Protocol* GetProtocol() { return protocol_.get(); }
 
-    void AddAudioData(AudioStreamPacket&& packet);
+    void AddAudioData(AudioStreamPacket&& packet, bool allow_during_conversation = false);
 
     VoiceCall* voice_call_;
 #endif

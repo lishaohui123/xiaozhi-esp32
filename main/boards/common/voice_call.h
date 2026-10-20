@@ -37,7 +37,8 @@ extern "C" {
 #define MQTT_TOPIC_DEVICE_CALL_END "device/%s/call/end"
 #define MQTT_TOPIC_DEVICE_CALL_RESPONSE "device/%s/call/response"
 #define TOPIC_DEVICE_ALARM_TEMPLATE  "device/%s/alarm"
-#define TOPIC_DEVICE_WORKS_TEMPLATE  "device/%s/works"
+#define TOPIC_DEVICE_WORKS_TEMPLATE "device/%s/works"
+#define TOPIC_DEVICE_WORKS2_TEMPLATE  "device/%s/works2"
 #define TOPIC_DEVICE_AUDIO_TEMPLATE  "device/%s/audio"
 #define TOPIC_SOCIAL_HD_TEMPLATE  "social/%s/hd"
 #define TOPIC_DEVICE_SET_TEMPLATE  "device/%s/set"
@@ -215,7 +216,9 @@ private:
 
     void handle_device_alarm(const char* payload);
 
-    void handle_device_works(const char* payload);
+    void handle_device_works(const char *payload);
+
+    void handle_device_works2(const char* payload);
 
     void handle_device_audio(const char *payload);
 

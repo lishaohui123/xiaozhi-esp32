@@ -62,6 +62,9 @@ public:
     
     // 获取提示语
     std::string GetTips(long tipTemplateId);
+
+    // 生成 TTS 流播放 URL，不改变设备状态，也不关闭当前对话
+    std::string GetTtsStreamUrl(const std::string& text);
     
     // TTS播放
     void PlayTtsAudioStream(const std::string& text, int repeat);

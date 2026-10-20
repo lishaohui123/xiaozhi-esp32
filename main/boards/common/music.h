@@ -3,11 +3,18 @@
 
 #include <string>
 
+struct AudioInfo {
+    std::string id;
+    std::string play_url;
+    int status;
+};
+
 class Music {
 public:
     virtual ~Music() = default;  // 添加虚析构函数
-    
-    virtual bool Download(const std::string& song_name, bool restart) = 0;
+
+    virtual bool Download(const std::string &song_name, bool restart) = 0;
+    virtual bool Download(const std::string& work_id, std::vector<AudioInfo> audios, bool restart) = 0;
     virtual bool Play() = 0;
     virtual bool Play(const std::string& music_url, int repeat) = 0;
     virtual bool PlayVoice(const std::string& music_url, int repeat) = 0;
@@ -25,10 +32,11 @@ public:
     // 新增流式播放相关方法
     virtual void PlayAudioStream() = 0;
     virtual bool StartStreaming(const std::string& music_url) = 0;
+    virtual bool StartStreamingPrompt(const std::string& music_url) = 0;
     virtual bool StopStreaming() = 0;  // 停止流式播放
     virtual size_t GetBufferSize() const = 0;
     virtual bool IsDownloading() const = 0;
     virtual bool IsPlaying() const = 0;
 };
 
-#endif // MUSIC_H 
+#endif // MUSIC_H

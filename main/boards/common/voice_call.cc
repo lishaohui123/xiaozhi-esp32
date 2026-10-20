@@ -13,6 +13,7 @@
 #include "settings.h"
 #include "alarm_manager.h"
 #include <string>
+#include <vector>
 #include <sstream>
 #include <iomanip>
 #include "esp_ns.h"
@@ -360,6 +361,7 @@ esp_err_t VoiceCall::initMqtt(const std::string& device_id, const std::string& d
         "device/" + m_device_info.device_id + "/call/response",
         "device/" + m_device_info.device_id + "/alarm",
         "device/" + m_device_info.device_id + "/works",
+         "device/" + m_device_info.device_id + "/works2",
         "device/" + m_device_info.device_id + "/audio",
         "social/" + m_device_info.device_id + "/hd",
         "device/" + m_device_info.device_id + "/set",
@@ -777,6 +779,13 @@ void VoiceCall::handle_mqtt_message(const char* topic, const char* payload, int 
         return;
     }
 
+    char device_works2_topic[64];
+    snprintf(device_works2_topic, sizeof(device_works2_topic), TOPIC_DEVICE_WORKS2_TEMPLATE, m_device_info.device_id.c_str());
+    if (strcmp(topic, device_works2_topic) == 0) {
+        ScheduleMqttHandler(&VoiceCall::handle_device_works2, payload);
+        return;
+    }
+
     char device_audio_topic[64];
     snprintf(device_audio_topic, sizeof(device_audio_topic), TOPIC_DEVICE_AUDIO_TEMPLATE, m_device_info.device_id.c_str());
     if (strcmp(topic, device_audio_topic) == 0) {
@@ -1053,6 +1062,66 @@ void VoiceCall::handle_device_works(const char* payload) {
         }
 
         music->Download(work_name, false);
+    }
+}
+
+/************************************************
+ * 接收小程序家长端点播的作品的播放，
+ * 从头开始播放
+* 补充：为了解决小程序点播作品时加速播放
+ *************************************************/
+void VoiceCall::handle_device_works2(const char* payload) {
+    if (!payload) {
+        ESP_LOGE(TAG, "Invalid call end payload");
+        return;
+    }
+
+    ESP_LOGI(TAG, "Handling play works: %s", payload);
+
+    cJSON* root = cJSON_Parse(payload);
+    if (!root) {
+        ESP_LOGE(TAG, "Failed to parse call end payload");
+        return;
+    }
+
+    std::string work_id = std::string(cJSON_GetObjectItem(root, "workId")->valuestring);
+    std::string work_name = std::string(cJSON_GetObjectItem(root, "workName")->valuestring);
+
+    std::vector<AudioInfo> audios;
+    cJSON* audios_array = cJSON_GetObjectItem(root, "audios");
+    if (cJSON_IsArray(audios_array)) {
+        cJSON* item = nullptr;
+        cJSON_ArrayForEach(item, audios_array) {
+            cJSON* audio_id = cJSON_GetObjectItem(item, "audioId");
+            cJSON* play_url = cJSON_GetObjectItem(item, "playUrl");
+            if (cJSON_IsString(audio_id) && cJSON_IsString(play_url)) {
+                AudioInfo audio;
+                audio.id = audio_id->valuestring;
+                audio.play_url = play_url->valuestring;
+                audios.push_back(audio);
+            }
+        }
+    }
+
+    ESP_LOGI(TAG, "Parsed %d audios for work: %s", (int)audios.size(), work_name.c_str());
+
+    cJSON_Delete(root);
+
+    if (m_udp_receive_task_running || m_udp_send_task_running) {
+        ESP_LOGI(TAG, "正在通话中，音乐播放不响应");
+    }
+    else {
+        auto music = Board::GetInstance().GetMusic();
+        music->StopStreaming();
+
+        // 增加语音播放，来提升用户体验
+        {
+            std::string s = "小主人，马上为你播放 " + work_name;
+            auto& alarm_manager = AlarmManager::GetInstance();
+            alarm_manager.PlayTtsAudioStreamVoice(s, 1);
+        }
+
+        music->Download(work_id, audios, false);
     }
 }
 

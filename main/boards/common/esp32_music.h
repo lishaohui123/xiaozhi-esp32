@@ -14,6 +14,7 @@
 #include "http_client.h"
 #include "protocol.h"
 #include "music.h"
+#include "voice_call.h"
 
 // MP3解码器支持
 extern "C" {
@@ -27,12 +28,6 @@ struct AudioChunk {
     
     AudioChunk() : data(nullptr), size(0) {}
     AudioChunk(uint8_t *d, size_t s) : data(d), size(s) {}
-};
-
-struct AudioInfo {
-    std::string id;
-    std::string play_url;
-    int status;
 };
 
 struct WorkInfo {
@@ -107,7 +102,8 @@ public:
     bool IsPlaying();
 
 	// impliments functions
-    virtual bool Download(const std::string& song_name, bool restart) override;
+    virtual bool Download(const std::string &song_name, bool restart) override;
+    virtual bool Download(const std::string& work_id, std::vector<AudioInfo> audios, bool restart) override;
     virtual bool Play() override;
     virtual bool Play(const std::string& music_url, int repeat) override;
     virtual bool PlayVoice(const std::string& music_url, int repeat) override;
@@ -125,6 +121,7 @@ public:
     // 新增方法
     virtual void PlayAudioStream();
     virtual bool StartStreaming(const std::string& music_url) override;
+    virtual bool StartStreamingPrompt(const std::string& music_url) override;
     virtual bool StopStreaming() override;  // 停止流式播放
     virtual size_t GetBufferSize() const override { return buffer_size_; }
     virtual bool IsDownloading() const override { return is_downloading_; }
@@ -147,6 +144,7 @@ private:
     std::atomic<bool> is_lyric_running_;
     std::atomic<bool> is_playing_;
     std::atomic<bool> is_downloading_;
+    std::atomic<bool> prompt_playback_mode_;
     std::atomic<int> is_state_completed_;
     std::atomic<int> is_play_audios_status_;
     int64_t current_play_time_ms_;  // 当前播放时间(毫秒)

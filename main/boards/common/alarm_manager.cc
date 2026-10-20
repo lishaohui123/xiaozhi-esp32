@@ -2277,20 +2277,23 @@ std::string AlarmManager::GetDateString(const struct tm& timeinfo) {
     return std::string(buffer);
 }
 
+std::string AlarmManager::GetTtsStreamUrl(const std::string& text) {
+    return std::format("{}tts?ttsApiKey={}&url={}&alarmAppId={}&token={}&cluster={}&deviceId={}&voiceType={}&uuid={}&text={}",
+                       OTA_URI,
+                       url_encode(GloableVar::tts_api_key),
+                       url_encode(GloableVar::tts_api_url),
+                       url_encode(GloableVar::alarm_app_id),
+                       url_encode(GloableVar::token),
+                       url_encode(GloableVar::cluster),
+                       url_encode(GloableVar::device_id),
+                       url_encode(GloableVar::voice_type),
+                       url_encode(GloableVar::generate_uuid()),
+                       url_encode(text));
+}
+
 void AlarmManager::PlayTtsAudioStream(const std::string& text, int repeat) {
     auto music = Board::GetInstance().GetMusic();
-    std::string url = std::format("{}tts?ttsApiKey={}&url={}&alarmAppId={}&token={}&cluster={}&deviceId={}&voiceType={}&uuid={}&text={}", 
-                                                OTA_URI, 
-                                                url_encode(GloableVar::tts_api_key), 
-                                                url_encode(GloableVar::tts_api_url), 
-                                                url_encode(GloableVar::alarm_app_id), 
-                                                url_encode(GloableVar::token), 
-                                                url_encode(GloableVar::cluster), 
-                                                url_encode(GloableVar::device_id), 
-                                                url_encode(GloableVar::voice_type), 
-                                                url_encode(GloableVar::generate_uuid()), 
-                                                url_encode(text));
-    
+    std::string url = GetTtsStreamUrl(text);
     music->Play(url, repeat);
     // 释放HTTP客户端残留连接
     alarm_client_.http_client_.reset();
@@ -2301,18 +2304,7 @@ void AlarmManager::PlayTtsAudioStream(const std::string& text, int repeat) {
 
 void AlarmManager::PlayTtsAudioStreamVoice(const std::string& text, int repeat) {
     auto music = Board::GetInstance().GetMusic();
-    std::string url = std::format("{}tts?ttsApiKey={}&url={}&alarmAppId={}&token={}&cluster={}&deviceId={}&voiceType={}&uuid={}&text={}", 
-                                                OTA_URI, 
-                                                url_encode(GloableVar::tts_api_key), 
-                                                url_encode(GloableVar::tts_api_url), 
-                                                url_encode(GloableVar::alarm_app_id), 
-                                                url_encode(GloableVar::token), 
-                                                url_encode(GloableVar::cluster), 
-                                                url_encode(GloableVar::device_id), 
-                                                url_encode(GloableVar::voice_type), 
-                                                url_encode(GloableVar::generate_uuid()), 
-                                                url_encode(text));
-    
+    std::string url = GetTtsStreamUrl(text);
     music->PlayVoice(url, repeat);
     // 释放HTTP客户端残留连接
     alarm_client_.http_client_.reset();
