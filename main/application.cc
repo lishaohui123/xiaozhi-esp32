@@ -543,7 +543,7 @@ void Application::CheckAssetsVersion() {
     // Apply assets
     assets.Apply();
     // display->SetChatMessage("system", "");
-    display->SetEmotion("start");
+    display->SetEmotion("neutral");
 }
 
 void Application::CheckNewVersion() {
