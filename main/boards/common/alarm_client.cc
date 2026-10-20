@@ -47,21 +47,19 @@ std::string AlarmClient::SendRequest(const std::string& path, const std::string&
         return "{\"success\": false, \"message\": \"DB client not initialized\"}";
     }
     
-    auto unique_http = Board::GetInstance().GetNetwork()->CreateHttp(0);
-    if (!unique_http) {
+    auto http = Board::GetInstance().GetNetwork()->CreateHttp(0);
+    if (!http) {
         ESP_LOGE(TAG, "Failed to create HTTP client");
         return "{\"success\": false, \"message\": \"Failed to create HTTP client\"}";
     }
 
-    std::shared_ptr<Http> shared_http = std::move(unique_http);
-    http_client_ = std::static_pointer_cast<HttpClient>(shared_http);
-    http_client_->SetKeepAlive(true);  // 启用 Keep-Alive
+    http->SetKeepAlive(true);  // 启用 Keep-Alive
 
     // 设置请求头
-    http_client_->SetHeader("Content-Type", "application/json");
-    http_client_->SetHeader("Device-ID", device_id_);
+    http->SetHeader("Content-Type", "application/json");
+    http->SetHeader("Device-ID", device_id_);
 
-    http_client_->SetHeader("token", ACCESS_TOKEN);
+    http->SetHeader("token", ACCESS_TOKEN);
         
     // 构建完整URL
     std::string url = api_url_ + path;
@@ -71,11 +69,11 @@ std::string AlarmClient::SendRequest(const std::string& path, const std::string&
     std::string body_str = body;
     if (!body.empty()) {
         ESP_LOGD(TAG, "Request body: %s", body.c_str());
-        http_client_->SetContent(std::move(body_str));
+        http->SetContent(std::move(body_str));
     }
         
     // 发送请求
-    if (!http_client_->Open(method.c_str(), url.c_str())) {
+    if (!http->Open(method.c_str(), url.c_str())) {
         ESP_LOGE(TAG, "Failed to open connection to %s", url.c_str());
         return "{\"success\": false, \"message\": \"Failed to open connection\"}";
     }
@@ -84,7 +82,7 @@ std::string AlarmClient::SendRequest(const std::string& path, const std::string&
     std::string response;
     char buffer[256];
     while (true) {
-        int ret = http_client_->Read(buffer, sizeof(buffer));
+        int ret = http->Read(buffer, sizeof(buffer));
         if (ret < 0) {
             ESP_LOGE(TAG, "Failed to read response body: %s", esp_err_to_name(ret));
             break;
@@ -95,10 +93,9 @@ std::string AlarmClient::SendRequest(const std::string& path, const std::string&
         response.append(buffer, ret);
     }
 
-    int status_code = http_client_->GetStatusCode();
+    int status_code = http->GetStatusCode();
         
-    http_client_->Close();
-    http_client_.reset();
+    http->Close();
 
     ESP_LOGI(TAG, "Response status code: %d", status_code);
         

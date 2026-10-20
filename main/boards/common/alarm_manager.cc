@@ -2296,7 +2296,6 @@ void AlarmManager::PlayTtsAudioStream(const std::string& text, int repeat) {
     std::string url = GetTtsStreamUrl(text);
     music->Play(url, repeat);
     // 释放HTTP客户端残留连接
-    alarm_client_.http_client_.reset();
     if (auto esp32music = dynamic_cast<Esp32Music*>(Board::GetInstance().GetMusic())) {
         esp32music->http_client_.reset();
     }
@@ -2307,7 +2306,6 @@ void AlarmManager::PlayTtsAudioStreamVoice(const std::string& text, int repeat) 
     std::string url = GetTtsStreamUrl(text);
     music->PlayVoice(url, repeat);
     // 释放HTTP客户端残留连接
-    alarm_client_.http_client_.reset();
     if (auto esp32music = dynamic_cast<Esp32Music*>(Board::GetInstance().GetMusic())) {
         esp32music->http_client_.reset();
     }
@@ -2372,7 +2370,6 @@ void AlarmManager::TriggerAlarm(const AlarmInfo& alarm) {
     size_t mem_c = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     ESP_LOGI("MEMLEAK", "[TriggerAlarm] B=%d C=%d dB-C=%d", mem_b, mem_c, mem_b - mem_c);
 
-    alarm_client_.http_client_.reset();  // 主动释放最后一个 HttpClient
     size_t mem_d = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     ESP_LOGI("MEMLEAK", "[TriggerAlarm] C=%d D=%d dC-D=%d total=%d", mem_c, mem_d, mem_c - mem_d, mem_a - mem_d);
 }

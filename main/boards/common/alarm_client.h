@@ -46,10 +46,6 @@ private:
     std::string api_url_;
     std::string device_id_;
     bool initialized_;
-
-public:
-    std::shared_ptr<HttpClient> http_client_;   // 复用 HTTP 客户端
-    
 };
 
 #endif // alarm_client_H
