@@ -361,7 +361,7 @@ esp_err_t VoiceCall::initMqtt(const std::string& device_id, const std::string& d
         "device/" + m_device_info.device_id + "/call/response",
         "device/" + m_device_info.device_id + "/alarm",
         "device/" + m_device_info.device_id + "/works",
-         "device/" + m_device_info.device_id + "/works2",
+        "device/" + m_device_info.device_id + "/works2",
         "device/" + m_device_info.device_id + "/audio",
         "social/" + m_device_info.device_id + "/hd",
         "device/" + m_device_info.device_id + "/set",
