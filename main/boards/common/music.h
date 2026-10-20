@@ -22,6 +22,7 @@ public:
     virtual bool PlayTouchAudio(const std::string &touch_url) = 0;
     virtual bool PlayRaisingSimAudio(const std::string &raisingsim_url) = 0;
     virtual bool Play2(const std::string& music_url) = 0;
+    virtual void PrefetchFirstAudio(const std::string& work_id, const std::vector<AudioInfo>& audios, bool restart) {}
     virtual bool Stop() = 0;
     virtual std::string GetDownloadResult() = 0;
     virtual std::string GetWorkName() = 0;

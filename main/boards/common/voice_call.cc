@@ -755,7 +755,7 @@ void VoiceCall::handle_mqtt_message(const char* topic, const char* payload, int 
         return;
     }
     
-    ESP_LOGI(TAG, "Handling MQTT message: topic=%s, payload=%s", topic, payload);
+    ESP_LOGI(TAG, "Handling MQTT message: topic=%s, payload_len=%d", topic, payload_len);
     
     // 检查是否是通话请求
     char device_call_request_topic[64];
@@ -1036,7 +1036,7 @@ void VoiceCall::handle_device_works(const char* payload) {
         return;
     }
 
-    ESP_LOGI(TAG, "Handling play works: %s", payload);
+    ESP_LOGI(TAG, "Handling play works (payload_len=%d)", (int)strlen(payload));
 
     cJSON* root = cJSON_Parse(payload);
     if (!root) {
@@ -1076,7 +1076,7 @@ void VoiceCall::handle_device_works2(const char* payload) {
         return;
     }
 
-    ESP_LOGI(TAG, "Handling play works: %s", payload);
+    ESP_LOGI(TAG, "Handling play works (payload_len=%d)", (int)strlen(payload));
 
     cJSON* root = cJSON_Parse(payload);
     if (!root) {
@@ -1113,6 +1113,9 @@ void VoiceCall::handle_device_works2(const char* payload) {
     else {
         auto music = Board::GetInstance().GetMusic();
         music->StopStreaming();
+#if 0
+        // 在播报提示音期间，后台解析当前集并预取第一集音频，缩短故事起播等待
+        music->PrefetchFirstAudio(work_id, audios, false);
 
         // 增加语音播放，来提升用户体验
         {
@@ -1120,7 +1123,7 @@ void VoiceCall::handle_device_works2(const char* payload) {
             auto& alarm_manager = AlarmManager::GetInstance();
             alarm_manager.PlayTtsAudioStreamVoice(s, 1);
         }
-
+#endif
         music->Download(work_id, audios, false);
     }
 }

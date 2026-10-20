@@ -111,6 +111,7 @@ public:
     virtual bool PlayTouchAudio(const std::string &touch_url)override;
     virtual bool PlayRaisingSimAudio(const std::string &raisingsim_url)override;
     virtual bool Play2(const std::string &music_url) override;
+    virtual void PrefetchFirstAudio(const std::string& work_id, const std::vector<AudioInfo>& audios, bool restart) override;
     virtual bool Stop() override;
     virtual std::string GetDownloadResult() override;
     virtual std::string GetWorkName() override;
@@ -157,6 +158,7 @@ private:
     TaskHandle_t play_audios_task_handle_ = nullptr;
     TaskHandle_t play_audio_task_handle_ = nullptr;
     TaskHandle_t lyric_task_handle_ = nullptr;
+    TaskHandle_t prefetch_task_handle_ = nullptr;
 
     // 静态任务函数
     static void DownloadAudioStreamTask(void* arg);
@@ -164,6 +166,7 @@ private:
     static void PlayAudiosTask(void* arg);
     static void PlayAudioTask(void* arg);
     static void LyricDisplayTask(void* arg);
+    static void PrefetchAudioTask(void* arg);
 
     // 播放作品的线程
     StackType_t* play_audios_task_stack_;
@@ -190,6 +193,24 @@ private:
     StaticTask_t* download_task_tcb_ = nullptr;                     // 任务控制块指针
     bool download_task_static_allocated_ = false;                   // 标记是否已静态分配
 
+    // 静态prefetch_task任务分配相关成员
+    static constexpr uint32_t PREFETCH_TASK_STACK_SIZE = 1024 * 8;  // 8KB栈空间
+    StackType_t* prefetch_task_stack_ = nullptr;                    // 任务栈指针
+    StaticTask_t* prefetch_task_tcb_ = nullptr;                     // 任务控制块指针
+    bool prefetch_task_static_allocated_ = false;                   // 标记是否已静态分配
+
+    // 第一集音频预取
+    std::mutex prefetch_mutex_;
+    std::string prefetch_url_;
+    std::vector<uint8_t> prefetch_buffer_;
+    size_t prefetch_bytes_ = 0;
+    std::atomic<bool> prefetch_ready_{false};
+    std::atomic<bool> prefetch_running_{false};
+    std::atomic<bool> prefetch_canceled_{false};
+    std::atomic<bool> prepared_ready_{false};
+    std::atomic<int32_t> prepared_cur_{0};
+    static constexpr size_t PREFETCH_MAX_BYTES = 256 * 1024;  // 预取最多 256KB
+
     // 音频缓冲区
     std::queue<AudioChunk> audio_buffer_;
     std::mutex buffer_mutex_;
@@ -204,9 +225,11 @@ private:
     bool mp3_decoder_initialized_;
     
     // 私有方法
-    void DownloadAudioStreamImpl(const std::string& music_url);
+    void DownloadAudioStreamImpl(const std::string& music_url, size_t initial_offset = 0);
     void PlayAudioStreamImpl();
     void ClearAudioBuffer();
+    void CancelPrefetch();
+    int32_t ComputeStartIndex(const WorkInfo& workInfo, const std::vector<AudioInfo>& audio_infos);
     bool InitializeMp3Decoder();
     void CleanupMp3Decoder();
     void ResetSampleRate();  // 重置采样率到原始值

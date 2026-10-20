@@ -28,6 +28,7 @@
 struct DownloadTaskParams {
     Esp32Music* self;
     std::string music_url;
+    size_t initial_offset;
 };
 
 // 创建任务参数结构
@@ -41,6 +42,14 @@ struct PlayAudiosTaskParams {
 struct PlayAudioTaskParam {
     Esp32Music* self;
     std::string music_url;
+};
+
+// 创建任务参数结构
+struct PrefetchTaskParams {
+    Esp32Music* self;
+    std::string work_id;
+    std::vector<AudioInfo> audios;
+    bool restart;
 };
 
 static bool WaitForStreamingWorkerFinished(const volatile std::atomic<bool>& finished,
@@ -166,6 +175,7 @@ Esp32Music::~Esp32Music() {
     is_lyric_running_ = false;
     is_play_audios_status_ = 0;
     is_state_completed_ = 2; // 标记为强制完成
+    prefetch_canceled_ = true;
     
     // 2. 通知所有等待的线程
     {
@@ -247,6 +257,14 @@ Esp32Music::~Esp32Music() {
         vTaskDelete(download_task_handle_);
         download_task_handle_ = nullptr;
         download_task_static_allocated_ = false;
+    }
+
+    // 删除第一集预取任务
+    if (prefetch_task_handle_ != nullptr) {
+        ESP_LOGI(TAG, "Force deleting prefetch task");
+        vTaskDelete(prefetch_task_handle_);
+        prefetch_task_handle_ = nullptr;
+        prefetch_task_static_allocated_ = false;
     }
     
     // 5. 清理音频缓冲区（确保在任务删除后进行）
@@ -1048,7 +1066,7 @@ void Esp32Music::PlayAudiosImpl(const std::string& work_id, std::vector<AudioInf
                 
                 // 3. 等待状态切换完成（增加延迟）
                 int wait_count = 0;
-                const int max_wait = 20; // 最多等待2秒
+                const int max_wait = 5; // 最多等待2秒
                 
                 while (wait_count < max_wait) {
                     vTaskDelay(pdMS_TO_TICKS(100));
@@ -1088,15 +1106,8 @@ void Esp32Music::PlayAudiosImpl(const std::string& work_id, std::vector<AudioInf
 
     for (int32_t i = cur; i < audio_infos.size();  i++) {
         if (!audio_infos.at(i).play_url.empty()) {
-            if (audio_infos.size() > 1) {
-                // 更新讲到当前集
-                WorkInfo workInfo;
-                workInfo.deviceId = GloableVar::device_id;
-                workInfo.workId = work_id;
-                workInfo.audioId = audio_infos.at(i).id;
-                workInfo.completed = 0;
-                InsertWorkInfo(workInfo);
-            }
+            // 不再在每集播放前同步上报“开始播放”，避免额外的 HTTPS 握手拖慢起播。
+            // 续播进度仍由播放完成后的 UpdateWorkInfo(completed=1) 维护。
 
             // 其他中断线程修改了状态位
             if (is_play_audios_status_ == 0) {
@@ -1267,22 +1278,17 @@ bool Esp32Music::Download(const std::string& work_id, std::vector<AudioInfo> aud
         int cur = 0;
         if (audios.size() > 1) {
             if (!restart) {
-                WorkInfo workInfo = GetWorkInfo(work_id);
-                std::string audio_id = workInfo.audioId;
-                int32_t completed = workInfo.completed;
-
-                if (!audio_id.empty()) {
-                    for (int32_t i = 0; i < audios.size();  i++) {
-                        if (audio_id == audios.at(i).id) {
-                            if ((i == (audios.size() - 1)) && (completed == 1)) {
-                                // 最后一集讲完，从头开始讲
-                                cur = 0;
-                                break;
-                            }
-                            cur = i;
-                            break;
-                        }
-                    }
+                // 优先使用后台准备任务已经解析好的当前集，避免播报结束后再同步查一次
+                uint32_t waited_ms = 0;
+                while (!prepared_ready_.load() && waited_ms < 2000) {
+                    vTaskDelay(pdMS_TO_TICKS(20));
+                    waited_ms += 20;
+                }
+                if (prepared_ready_.load()) {
+                    cur = prepared_cur_.load();
+                } else {
+                    WorkInfo workInfo = GetWorkInfo(work_id);
+                    cur = ComputeStartIndex(workInfo, audios);
                 }
             }
         }
@@ -1685,6 +1691,8 @@ bool Esp32Music::StartStreaming(const std::string& music_url) {
     // 重置事件组状态
     resetStreamingEvents();
 
+    size_t download_offset = 0;
+
     {
         ForceStopAllTasks();
         vTaskDelay(pdMS_TO_TICKS(100));
@@ -1698,6 +1706,44 @@ bool Esp32Music::StartStreaming(const std::string& music_url) {
 
         // 清空缓冲区
         ClearAudioBuffer();
+
+        // 优先消费预取的第一集音频，避免故事起播时再等 CDN 握手
+        {
+            std::vector<uint8_t> prefetched;
+            {
+                std::lock_guard<std::mutex> lock(prefetch_mutex_);
+                if (prefetch_ready_ && !prefetch_buffer_.empty()) {
+                    if (prefetch_url_ == music_url) {
+                        prefetched = std::move(prefetch_buffer_);
+                    } else {
+                        prefetch_buffer_.clear();
+                    }
+                    prefetch_ready_ = false;
+                    prefetch_bytes_ = 0;
+                    prefetch_url_.clear();
+                }
+            }
+
+            size_t pos = 0;
+            while (pos < prefetched.size()) {
+                size_t n = std::min<size_t>(DEFAULT_CHUNK_SIZE * 4, prefetched.size() - pos);
+                uint8_t* chunk = AllocateAudioChunk(n);
+                if (!chunk) {
+                    break;
+                }
+                memcpy(chunk, prefetched.data() + pos, n);
+                {
+                    std::lock_guard<std::mutex> lock(buffer_mutex_);
+                    audio_buffer_.push(AudioChunk(chunk, n));
+                    buffer_size_.fetch_add(n, std::memory_order_relaxed);
+                }
+                pos += n;
+            }
+            download_offset = pos;
+            if (pos > 0) {
+                ESP_LOGI(TAG, "已消费预取音频 %d 字节，后续从偏移 %d 继续下载", (int)pos, (int)pos);
+            }
+        }
 
         // 重置mp3解码器
         CleanupMp3Decoder();
@@ -1728,7 +1774,7 @@ bool Esp32Music::StartStreaming(const std::string& music_url) {
         assert(download_task_tcb_ != nullptr);
     }
 #endif
-    DownloadTaskParams* download_params = new DownloadTaskParams{this, music_url};
+    DownloadTaskParams* download_params = new DownloadTaskParams{this, music_url, download_offset};
 #if 0
     xTaskCreatePinnedToCore(DownloadAudioStreamTask, "audio_download", 1024 * 12, download_params, 1, &download_task_handle_, 1);
 #endif
@@ -1854,10 +1900,11 @@ void Esp32Music::DownloadAudioStreamTask(void* arg) {
     auto* params = static_cast<DownloadTaskParams*>(arg);
     auto* self = params->self;
     std::string music_url = std::move(params->music_url);
+    size_t initial_offset = params->initial_offset;
     delete params;
 
     self->is_downloaded = false;
-    self->DownloadAudioStreamImpl(music_url);
+    self->DownloadAudioStreamImpl(music_url, initial_offset);
     
     ESP_LOGI(TAG, "DownloadAudioStreamTask finished");
 
@@ -1925,6 +1972,160 @@ void Esp32Music::PlayAudiosTask(void* arg) {
     while (true) vTaskDelay(portMAX_DELAY);
 }
 
+void Esp32Music::CancelPrefetch() {
+    prefetch_canceled_ = true;
+    {
+        std::lock_guard<std::mutex> lock(prefetch_mutex_);
+        prefetch_ready_ = false;
+        prefetch_buffer_.clear();
+        prefetch_bytes_ = 0;
+        prefetch_url_.clear();
+        prepared_ready_ = false;
+        prepared_cur_ = 0;
+    }
+}
+
+void Esp32Music::PrefetchFirstAudio(const std::string& work_id, const std::vector<AudioInfo>& audios, bool restart) {
+    // 先让旧预取任务退出并删除，再重置状态，避免旧任务回写脏数据
+    prefetch_canceled_ = true;
+
+    {
+        std::lock_guard<std::mutex> lock(prefetch_mutex_);
+        if (prefetch_task_handle_ != nullptr) {
+            vTaskDelete(prefetch_task_handle_);
+            prefetch_task_handle_ = nullptr;
+        }
+        prefetch_url_.clear();
+        prefetch_buffer_.clear();
+        prefetch_bytes_ = 0;
+        prefetch_ready_ = false;
+        prepared_ready_ = false;
+        prepared_cur_ = 0;
+    }
+
+    prefetch_canceled_ = false;
+
+    if (prefetch_task_stack_ == nullptr) {
+        prefetch_task_stack_ = (StackType_t*)heap_caps_malloc(PREFETCH_TASK_STACK_SIZE * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
+        assert(prefetch_task_stack_ != nullptr);
+    }
+    if (prefetch_task_tcb_ == nullptr) {
+        prefetch_task_tcb_ = (StaticTask_t*)heap_caps_malloc(sizeof(StaticTask_t), MALLOC_CAP_INTERNAL);
+        assert(prefetch_task_tcb_ != nullptr);
+    }
+
+    PrefetchTaskParams* params = new PrefetchTaskParams{this, work_id, audios, restart};
+
+    prefetch_task_handle_ = xTaskCreateStatic(
+        PrefetchAudioTask,
+        "prefetch_audio",
+        PREFETCH_TASK_STACK_SIZE,
+        params,
+        1,
+        prefetch_task_stack_,
+        prefetch_task_tcb_
+    );
+    assert(prefetch_task_handle_ != nullptr);
+    prefetch_task_static_allocated_ = true;
+}
+
+void Esp32Music::PrefetchAudioTask(void* arg) {
+    auto* params = static_cast<PrefetchTaskParams*>(arg);
+    auto* self = params->self;
+    std::string work_id = std::move(params->work_id);
+    std::vector<AudioInfo> audios = std::move(params->audios);
+    bool restart = params->restart;
+    delete params;
+
+    self->prefetch_running_ = true;
+
+    // 在后台并行解析当前集，避免播报结束后再同步查一次
+    int32_t cur = 0;
+    if (audios.size() > 1 && !restart) {
+        WorkInfo workInfo = self->GetWorkInfo(work_id);
+        cur = self->ComputeStartIndex(workInfo, audios);
+    }
+
+    std::string url;
+    if (cur >= 0 && cur < (int32_t)audios.size()) {
+        url = audios[cur].play_url;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(self->prefetch_mutex_);
+        self->prepared_cur_ = cur;
+        self->prepared_ready_ = true;
+        self->prefetch_url_ = url;
+    }
+
+    std::vector<uint8_t> buf;
+    buf.reserve(self->PREFETCH_MAX_BYTES);
+
+    if (!url.empty() && url.find("http") == 0 && !self->prefetch_canceled_) {
+        int connection_id = esp_random() % 10000;
+        auto http = Board::GetInstance().GetNetwork()->CreateHttp(connection_id);
+        std::shared_ptr<Http> shared_http = std::move(http);
+        std::shared_ptr<HttpClient> client = std::static_pointer_cast<HttpClient>(shared_http);
+        client->SetKeepAlive(true);
+        client->SetTimeout(8000);
+
+        if (client->Open("GET", url)) {
+            int status = client->GetStatusCode();
+            if (status == 200 || status == 206) {
+                char chunk[1024];
+                while (buf.size() < self->PREFETCH_MAX_BYTES && !self->prefetch_canceled_) {
+                    int n = client->Read(chunk, sizeof(chunk));
+                    if (n < 0) break;
+                    if (n == 0) break;
+                    buf.insert(buf.end(), chunk, chunk + n);
+                }
+            } else {
+                ESP_LOGW(TAG, "Prefetch: HTTP status %d", status);
+            }
+        } else {
+            ESP_LOGW(TAG, "Prefetch: failed to open URL");
+        }
+        client->Close();
+    }
+
+    if (!self->prefetch_canceled_ && !buf.empty()) {
+        std::lock_guard<std::mutex> lock(self->prefetch_mutex_);
+        if (self->prefetch_url_ == url) {
+            self->prefetch_buffer_ = std::move(buf);
+            self->prefetch_bytes_ = self->prefetch_buffer_.size();
+            self->prefetch_ready_ = true;
+            ESP_LOGI(TAG, "Prefetch ready: %d bytes", (int)self->prefetch_bytes_);
+        }
+    } else {
+        std::lock_guard<std::mutex> lock(self->prefetch_mutex_);
+        self->prefetch_ready_ = false;
+        self->prefetch_bytes_ = 0;
+    }
+
+    self->prefetch_running_ = false;
+    while (true) vTaskDelay(portMAX_DELAY);
+}
+
+int32_t Esp32Music::ComputeStartIndex(const WorkInfo& workInfo, const std::vector<AudioInfo>& audio_infos) {
+    int32_t cur = 0;
+    std::string audio_id = workInfo.audioId;
+    int32_t completed = (int32_t)workInfo.completed;
+
+    if (!audio_id.empty()) {
+        for (int32_t i = 0; i < (int32_t)audio_infos.size(); i++) {
+            if (audio_id == audio_infos.at(i).id) {
+                if ((i == (int32_t)audio_infos.size() - 1) && (completed == 1)) {
+                    cur = 0;
+                    break;
+                }
+                cur = i;
+                break;
+            }
+        }
+    }
+    return cur;
+}
+
 bool Esp32Music::StopStreaming() {
     ESP_LOGI(TAG, "Stopping music streaming - current state: downloading=%d, playing=%d", 
             is_downloading_.load(), is_playing_.load());
@@ -1933,6 +2134,7 @@ bool Esp32Music::StopStreaming() {
     is_play_audios_status_ = 0;
     is_state_completed_ = 2;
     prompt_playback_mode_ = false;
+    CancelPrefetch();
 
     // 重置采样率到原始值
     ResetSampleRate();
@@ -2212,7 +2414,7 @@ void Esp32Music::FreeAudioPacket(AudioStreamPacket* packet) {
 /****************************************
 * 具体执行下载音乐流的函数，在指定的URL进行下载
 ****************************************/
-void Esp32Music::DownloadAudioStreamImpl(const std::string& music_url) {
+void Esp32Music::DownloadAudioStreamImpl(const std::string& music_url, size_t initial_offset) {
     ESP_LOGI(TAG, "开始音频流下载 - 添加统计信息，music_url=%s", music_url.c_str());
   
     // 验证URL有效性
@@ -2253,7 +2455,7 @@ void Esp32Music::DownloadAudioStreamImpl(const std::string& music_url) {
         return -1;
     };
 
-    int status_code = connect_http(0);
+    int status_code = connect_http(initial_offset);
     if (status_code != 200 && status_code != 206) {
         ESP_LOGE(TAG, "HTTP GET失败，状态码: %d", status_code);
         client->Close();
@@ -2310,7 +2512,7 @@ void Esp32Music::DownloadAudioStreamImpl(const std::string& music_url) {
                          bytes_read, retry_count + 1, max_retries, local_downloaded_bytes);
 
                 retry_count++;
-                int retry_status = connect_http(local_downloaded_bytes);
+                int retry_status = connect_http(initial_offset + local_downloaded_bytes);
 
                 if (retry_status == 206) {
                     status_code = retry_status;
