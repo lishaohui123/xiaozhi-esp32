@@ -150,7 +150,7 @@ esp_err_t Ota::CheckVersion() {
             activation_timeout_ms_ = timeout_ms->valueint;
         }
     }
-
+#if 0
     has_mqtt_config_ = false;
     cJSON *mqtt = cJSON_GetObjectItem(root, "mqtt");
     if (cJSON_IsObject(mqtt)) {
@@ -210,7 +210,7 @@ esp_err_t Ota::CheckVersion() {
     } else {
         ESP_LOGW(TAG, "No server_time section found!");
     }
-
+#endif
     has_new_version_ = false;
     cJSON *firmware = cJSON_GetObjectItem(root, "firmware");
     if (cJSON_IsObject(firmware)) {

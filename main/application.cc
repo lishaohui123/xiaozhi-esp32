@@ -19,6 +19,8 @@
 #include <cstring>
 #include <map>
 #include <esp_log.h>
+#include <esp_heap_caps.h>
+#include <freertos/idf_additions.h>
 #include <cJSON.h>
 #include <driver/gpio.h>
 #include <arpa/inet.h>
@@ -111,6 +113,30 @@ Application::Application() {
         .arg = this,
     };
     esp_timer_create(&touch_timer_args, &touch_timer_handle_);
+
+    update_firmware_task_stack_ = (StackType_t*)heap_caps_malloc(
+        UPDATE_FIRMWARE_STACK_SIZE * sizeof(StackType_t),
+        MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT
+    );
+    update_firmware_task_tcb_ = (StaticTask_t*)heap_caps_malloc(
+        sizeof(StaticTask_t),
+        MALLOC_CAP_INTERNAL
+    );
+
+    if (update_firmware_task_stack_ == nullptr || update_firmware_task_tcb_ == nullptr) {
+        update_firmware_task_static_ = false;
+        ESP_LOGW(TAG, "Reserve update firmware internal stack failed, fallback to dynamic task");
+        if (update_firmware_task_stack_ != nullptr) {
+            heap_caps_free(update_firmware_task_stack_);
+            update_firmware_task_stack_ = nullptr;
+        }
+        if (update_firmware_task_tcb_ != nullptr) {
+            heap_caps_free(update_firmware_task_tcb_);
+            update_firmware_task_tcb_ = nullptr;
+        }
+    } else {
+        update_firmware_task_static_ = true;
+    }
 }
 
 Application::~Application() {
@@ -124,6 +150,22 @@ Application::~Application() {
     }
     if (touch_debounce_queue_) {
         vQueueDelete(touch_debounce_queue_);
+    }
+    if (update_firmware_task_handle_ != nullptr) {
+        if (update_firmware_task_static_) {
+            vTaskDelete(update_firmware_task_handle_);
+        } else {
+            vTaskDeleteWithCaps(update_firmware_task_handle_);
+        }
+        update_firmware_task_handle_ = nullptr;
+    }
+    if (update_firmware_task_stack_ != nullptr) {
+        heap_caps_free(update_firmware_task_stack_);
+        update_firmware_task_stack_ = nullptr;
+    }
+    if (update_firmware_task_tcb_ != nullptr) {
+        heap_caps_free(update_firmware_task_tcb_);
+        update_firmware_task_tcb_ = nullptr;
     }
     vEventGroupDelete(event_group_);
 }
@@ -645,18 +687,61 @@ void Application::CheckNewVersion() {
  ************************/
 void Application::UpdateFirmwareTask() {
     if (update_firmware_task_handle_ != nullptr) {
-        ESP_LOGW(TAG, "UpdateFirmwareTask task already running");
+        eTaskState task_state = eTaskGetState(update_firmware_task_handle_);
+        if (task_state != eBlocked && task_state != eSuspended) {
+            ESP_LOGW(TAG, "UpdateFirmwareTask task already running");
+            return;
+        }
+        if (update_firmware_task_static_) {
+            vTaskDelete(update_firmware_task_handle_);
+        } else {
+            vTaskDeleteWithCaps(update_firmware_task_handle_);
+        }
+        update_firmware_task_handle_ = nullptr;
+    }
+
+    auto update_firmware_task = [](void* arg) {
+        Application* app = static_cast<Application*>(arg);
+        app->UpdateFirmware(arg);
+        while (true) {
+            vTaskDelay(portMAX_DELAY);
+        }
+    };
+
+    if (update_firmware_task_stack_ != nullptr && update_firmware_task_tcb_ != nullptr) {
+        update_firmware_task_handle_ = xTaskCreateStatic(
+            update_firmware_task,
+            "update_ota",
+            UPDATE_FIRMWARE_STACK_SIZE,
+            this,
+            2,
+            update_firmware_task_stack_,
+            update_firmware_task_tcb_
+        );
+        if (update_firmware_task_handle_ == nullptr) {
+            ESP_LOGE(TAG, "Failed to create update firmware task");
+            return;
+        }
+        update_firmware_task_static_ = true;
+        ESP_LOGI(TAG, "Update firmware task created from reserved memory");
         return;
     }
 
-    xTaskCreate([](void* arg) {
-        Application* app = static_cast<Application*>(arg);
-        app->UpdateFirmware(arg);
-        app->update_firmware_task_handle_ = nullptr;
-
-        vTaskDelete(NULL);
-    }, "UpdateFirmwareTask", 1024 * 32, this, 2, &update_firmware_task_handle_);
-    assert(update_firmware_task_handle_ != nullptr);
+    BaseType_t ret = xTaskCreateWithCaps(
+        update_firmware_task,
+        "update_ota",
+        UPDATE_FIRMWARE_STACK_SIZE,
+        this,
+        2,
+        &update_firmware_task_handle_,
+        MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT
+    );
+    if (ret != pdPASS) {
+        update_firmware_task_handle_ = nullptr;
+        ESP_LOGE(TAG, "Failed to allocate update firmware task stack: %u bytes", UPDATE_FIRMWARE_STACK_SIZE);
+    } else {
+        update_firmware_task_static_ = false;
+    }
 }
 
 void Application::UpdateFirmware(void *arg) {

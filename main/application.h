@@ -183,6 +183,10 @@ private:
     bool play_popup_on_listening_ = false;  // Flag to play popup sound after state changes to listening
     int clock_ticks_ = 0;
     TaskHandle_t activation_task_handle_ = nullptr;
+    static constexpr uint32_t UPDATE_FIRMWARE_STACK_SIZE = 1024 * 16;
+    StackType_t* update_firmware_task_stack_ = nullptr;
+    StaticTask_t* update_firmware_task_tcb_ = nullptr;
+    bool update_firmware_task_static_ = false;
 
     // Event handlers
     void HandleStateChangedEvent();
