@@ -4527,7 +4527,145 @@ std::string Esp32Music::GetWorkByCategory(long storyCategoryId) {
 
 /**********************************************
  * 支持MCP随机讲故事和唱儿歌
+* 补充：
+* 进行交互上的简化，减少时间
  **********************************************/
+bool Esp32Music::PlayRandomByCategory(std::string content) {
+
+    // 直接向后台请求播放的音频列表
+    Ota ota;
+    // std::string url = ota.GetCheckVersionUrl();
+    std::string url = OTA_URI;
+    if (url.back() != '/') {
+        url += "/wechat/work/random?deviceId=" + GloableVar::device_id + "&content=" + url_encode(content);
+    } else {
+        url += "wechat/work/random?deviceId=" + GloableVar::device_id + "&content=" + url_encode(content);
+    }
+
+    auto http = std::unique_ptr<Http>(ota.SetupHttp());
+
+    std::shared_ptr<Http> shared_http = std::move(http);
+    http_client_ = std::static_pointer_cast<HttpClient>(shared_http);
+    http_client_->SetKeepAlive(true); // 启用 Keep-Alive
+
+    if (!http_client_->Open("GET", url)) {
+        ESP_LOGE(TAG, "Failed to open HTTP connection");
+        http_client_->Close();
+        return false;
+    }
+
+    // 检查响应状态码
+    int status_code = http_client_->GetStatusCode();
+    if (status_code != 200) {
+        ESP_LOGE(TAG, "HTTP GET failed with status code: %d", status_code);
+        http_client_->Close();
+        return false;
+    }
+
+    // 读取响应数据
+    // 参考 Ota::Upgrade 函数的分块读取方法
+    std::string response;
+    char buffer[512]; // 使用与 Upgrade 函数相同的缓冲区大小
+    size_t total_read = 0;
+    int64_t last_calc_time = esp_timer_get_time();
+    size_t recent_read = 0;
+    bool read_success = true;
+
+    // 开始分块读取循环
+    while (true) {
+        int bytes_read = http_client_->Read(buffer, sizeof(buffer));
+        
+        if (bytes_read < 0) {
+            // 读取错误，但可能已经读取到部分数据
+            ESP_LOGE(TAG, "HTTP read error: %d, total read so far: %u", bytes_read, total_read);
+            read_success = false;
+            break;
+        }
+        
+        if (bytes_read > 0) {
+            // 成功读取数据
+            response.append(buffer, bytes_read);
+            total_read += bytes_read;
+            recent_read += bytes_read;
+            
+            // 每秒打印一次进度
+            if (esp_timer_get_time() - last_calc_time >= 1000000) { // 1秒
+                ESP_LOGI(TAG, "Read %u bytes, total: %u", recent_read, total_read);
+                last_calc_time = esp_timer_get_time();
+                recent_read = 0;
+            }
+        }
+        
+        if (bytes_read == 0) {
+            // 正常读取结束
+            ESP_LOGI(TAG, "HTTP read completed, total: %u bytes", total_read);
+            break;
+        }
+    }
+
+    http_client_->Close();
+    
+    ESP_LOGI(TAG, "HTTP POST Status = %d, content_length = %d", status_code, response.length());
+    ESP_LOGD(TAG, "content response: %s", response.c_str());
+
+    // 解析返回结果
+    cJSON* root = cJSON_Parse(response.c_str());
+    if (!root) {
+        ESP_LOGE(TAG, "Failed to parse JSON response");
+        return false;
+    }
+
+    // 检查retcode
+    cJSON* retcode = cJSON_GetObjectItem(root, "retcode");
+    if (!cJSON_IsNumber(retcode) || retcode->valueint != 0) {
+        ESP_LOGE(TAG, "API error, retcode: %d", cJSON_IsNumber(retcode) ? retcode->valueint : -1);
+        cJSON_Delete(root);
+        return false;
+    }
+
+    // 获取data对象
+    cJSON* data = cJSON_GetObjectItem(root, "data");
+    if (!data) {
+        ESP_LOGE(TAG, "No data in response");
+        cJSON_Delete(root);
+        return false;
+    }
+
+    std::string work_id = std::string(cJSON_GetObjectItem(data, "workId")->valuestring);
+    std::string work_name = std::string(cJSON_GetObjectItem(data, "workName")->valuestring);
+    work_name_ = work_name;
+
+    std::vector<AudioInfo> audios;
+    cJSON* audios_array = cJSON_GetObjectItem(data, "audios");
+    if (cJSON_IsArray(audios_array)) {
+        cJSON* item = nullptr;
+        cJSON_ArrayForEach(item, audios_array) {
+            cJSON* audio_id = cJSON_GetObjectItem(item, "audioId");
+            cJSON* play_url = cJSON_GetObjectItem(item, "playUrl");
+            if (cJSON_IsString(audio_id) && cJSON_IsString(play_url)) {
+                AudioInfo audio;
+                audio.id = audio_id->valuestring;
+                audio.play_url = play_url->valuestring;
+                audios.push_back(audio);
+            }
+        }
+    }
+    
+    cJSON_Delete(root);
+
+
+    // 直接播放后台返回的音频列表
+    {
+        auto music = Board::GetInstance().GetMusic();
+        music->StopStreaming();
+
+        music->Download(work_id, audios, false);
+    }
+
+    return true;
+}
+
+#if 0       // 老的代码交互太复杂了
 bool Esp32Music::PlayRandomByCategory(std::string content) {
     // 获取所有一级分类
     std::vector<categorie> categories = GetCategories(-1); // -1表示获取一级分类
@@ -4558,6 +4696,8 @@ bool Esp32Music::PlayRandomByCategory(std::string content) {
         return Download(rand_story, false);
     }
 }
+#endif
+
 
 void Esp32Music::resetStreamingEvents() {
     if (streaming_event_group_) {
