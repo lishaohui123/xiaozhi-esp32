@@ -20,6 +20,7 @@
 #include "esp_agc.h"
 #include "audio_codec.h"
 #include "board.h"
+#include "esp32_music.h"
 #include "esp_log.h"
 #include "esp_task_wdt.h"
 #include "constants.h"
@@ -1228,10 +1229,17 @@ void VoiceCall::handle_device_raisingsim(const char* payload) {
     std::string hd_cz = std::string(cJSON_GetObjectItem(root, "hdCz")->valuestring);
     cJSON_Delete(root);
 
-    // 正常对话时、电话时、播放故事时，都不触发的
-    if ((kDeviceStateIdle == Application::GetInstance().GetDeviceState()) && (Application::GetInstance().GetAudioService().is_voice_out_ == false)) {
+    auto* music = Board::GetInstance().GetMusic();
+    bool raising_active = false;
+    if (auto* esp32_music = dynamic_cast<Esp32Music*>(music)) {
+        raising_active = esp32_music->IsRaisingSimActive();
+    }
+
+    // 正常对话时、电话时、播放故事时都不触发；但自己的喂养语音播放中仍允许入队，交给队列做最新优先。
+    if ((kDeviceStateIdle == Application::GetInstance().GetDeviceState()) &&
+        (Application::GetInstance().GetAudioService().is_voice_out_ == false || raising_active)) {
         std::string raisingsim_url = std::format("{}RaisingSim?deviceId={}&voiceType={}&hdName={}&hdCz={}", OTA_URI, GloableVar::device_id, urlEncode(GloableVar::voice_type), urlEncode(hd_name), urlEncode(hd_cz));
-        Board::GetInstance().GetMusic()->PlayRaisingSimAudio(raisingsim_url);
+        music->PlayRaisingSimAudio(raisingsim_url);
     }
 }
 

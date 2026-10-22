@@ -110,6 +110,7 @@ public:
     virtual bool PlayHdAudio(const std::string &audio_url)override;
     virtual bool PlayTouchAudio(const std::string &touch_url)override;
     virtual bool PlayRaisingSimAudio(const std::string &raisingsim_url)override;
+    bool IsRaisingSimActive() const { return raising_playback_active_.load(); }
     virtual bool Play2(const std::string &music_url) override;
     virtual void PrefetchFirstAudio(const std::string& work_id, const std::vector<AudioInfo>& audios, bool restart) override;
     virtual bool Stop() override;
@@ -161,6 +162,7 @@ private:
     TaskHandle_t play_audio_task_handle_ = nullptr;
     TaskHandle_t lyric_task_handle_ = nullptr;
     TaskHandle_t prefetch_task_handle_ = nullptr;
+    TaskHandle_t raising_worker_task_handle_ = nullptr;
 
     // 静态任务函数
     static void DownloadAudioStreamTask(void* arg);
@@ -169,6 +171,7 @@ private:
     static void PlayAudioTask(void* arg);
     static void LyricDisplayTask(void* arg);
     static void PrefetchAudioTask(void* arg);
+    static void RaisingSimQueueTask(void* arg);
 
     // 播放作品的线程
     StackType_t* play_audios_task_stack_;
@@ -200,6 +203,18 @@ private:
     StackType_t* prefetch_task_stack_ = nullptr;                    // 任务栈指针
     StaticTask_t* prefetch_task_tcb_ = nullptr;                     // 任务控制块指针
     bool prefetch_task_static_allocated_ = false;                   // 标记是否已静态分配
+
+    // Latest-wins bounded queue (capacity 1) and consumer task for feeding voice
+    std::mutex raising_queue_mutex_;
+    std::condition_variable raising_queue_cv_;
+    std::string pending_raising_url_;
+    bool pending_raising_ready_ = false;
+    std::atomic<bool> raising_worker_stop_{false};
+    std::atomic<bool> raising_playback_active_{false};
+    static constexpr uint32_t RAISING_WORKER_TASK_STACK_SIZE = 1024 * 8;  // 8KB stack
+    StackType_t* raising_worker_task_stack_ = nullptr;
+    StaticTask_t* raising_worker_task_tcb_ = nullptr;
+    bool raising_worker_task_static_allocated_ = false;
 
     // 第一集音频预取
     std::mutex prefetch_mutex_;
@@ -256,6 +271,8 @@ private:
     std::string GetWorkByCategory(long storyCategoryId);
 
     void StopWorksAudio();
+    void RaisingSimQueueLoop();
+    void EnsureRaisingWorkerStarted();
 
         // 🔥 添加以下成员变量用于统计
     long total_downloaded_in_mp3_bytes = 0;  // 实际下载的MP3字节数

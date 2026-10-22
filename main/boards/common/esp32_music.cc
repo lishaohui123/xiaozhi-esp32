@@ -183,6 +183,15 @@ Esp32Music::~Esp32Music() {
         std::lock_guard<std::mutex> lock(buffer_mutex_);
         buffer_cv_.notify_all();
     }
+
+    // 停止喂养语音队列 worker，并清理待播报请求
+    raising_worker_stop_.store(true, std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> lock(raising_queue_mutex_);
+        pending_raising_ready_ = false;
+        pending_raising_url_.clear();
+    }
+    raising_queue_cv_.notify_all();
     
     // 3. 等待一段时间让任务有机会自然退出
     const int max_wait_ticks = 50; // 等待最多500ms
@@ -266,6 +275,14 @@ Esp32Music::~Esp32Music() {
         vTaskDelete(prefetch_task_handle_);
         prefetch_task_handle_ = nullptr;
         prefetch_task_static_allocated_ = false;
+    }
+
+    // 删除喂养语音队列 worker
+    if (raising_worker_task_handle_ != nullptr) {
+        ESP_LOGI(TAG, "Force deleting raising queue task");
+        vTaskDelete(raising_worker_task_handle_);
+        raising_worker_task_handle_ = nullptr;
+        raising_worker_task_static_allocated_ = false;
     }
     
     // 5. 清理音频缓冲区（确保在任务删除后进行）
@@ -1392,7 +1409,82 @@ bool Esp32Music::PlayTouchAudio(const std::string& touch_url) {
  * 该函数是为了响应小龙的喂养语音
  ***********************************/
 bool Esp32Music::PlayRaisingSimAudio(const std::string&  raisingsim_url) {
-    return PlayVoice(raisingsim_url, 1);
+    // 最新消息优先：只保留最新一条喂养/互动语音，快速喂食时不会逐条堆积。
+    EnsureRaisingWorkerStarted();
+    {
+        std::lock_guard<std::mutex> lock(raising_queue_mutex_);
+        pending_raising_url_ = raisingsim_url;
+        pending_raising_ready_ = true;
+    }
+    raising_queue_cv_.notify_one();
+    return true;
+}
+
+void Esp32Music::EnsureRaisingWorkerStarted() {
+    if (raising_worker_task_handle_ != nullptr) {
+        return;
+    }
+
+    raising_worker_stop_.store(false, std::memory_order_release);
+
+    if (raising_worker_task_stack_ == nullptr) {
+        raising_worker_task_stack_ = (StackType_t*)heap_caps_malloc(
+            RAISING_WORKER_TASK_STACK_SIZE * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
+        assert(raising_worker_task_stack_ != nullptr);
+    }
+    if (raising_worker_task_tcb_ == nullptr) {
+        raising_worker_task_tcb_ = (StaticTask_t*)heap_caps_malloc(
+            sizeof(StaticTask_t), MALLOC_CAP_INTERNAL);
+        assert(raising_worker_task_tcb_ != nullptr);
+    }
+
+    raising_worker_task_handle_ = xTaskCreateStatic(
+        RaisingSimQueueTask,
+        "raising_queue",
+        RAISING_WORKER_TASK_STACK_SIZE,
+        this,
+        1,
+        raising_worker_task_stack_,
+        raising_worker_task_tcb_);
+    assert(raising_worker_task_handle_ != nullptr);
+    raising_worker_task_static_allocated_ = true;
+    ESP_LOGI(TAG, "RaisingSim queue task created");
+}
+
+void Esp32Music::RaisingSimQueueTask(void* arg) {
+    auto* self = static_cast<Esp32Music*>(arg);
+    self->RaisingSimQueueLoop();
+    // 静态任务由析构函数负责删除，这里只保持挂起，避免任务句柄失效。
+    while (true) vTaskDelay(portMAX_DELAY);
+}
+
+void Esp32Music::RaisingSimQueueLoop() {
+    ESP_LOGI(TAG, "RaisingSim queue task started");
+    while (!raising_worker_stop_.load(std::memory_order_acquire)) {
+        std::string url;
+        {
+            std::unique_lock<std::mutex> lock(raising_queue_mutex_);
+            raising_queue_cv_.wait(lock, [this]() {
+                return pending_raising_ready_ || raising_worker_stop_.load(std::memory_order_acquire);
+            });
+            if (raising_worker_stop_.load(std::memory_order_acquire)) {
+                break;
+            }
+            url = std::move(pending_raising_url_);
+            pending_raising_url_.clear();
+            pending_raising_ready_ = false;
+        }
+
+        if (url.empty()) {
+            continue;
+        }
+
+        raising_playback_active_.store(true, std::memory_order_release);
+        PlayVoice(url, 1);
+        raising_playback_active_.store(false, std::memory_order_release);
+    }
+    raising_playback_active_.store(false, std::memory_order_release);
+    ESP_LOGI(TAG, "RaisingSim queue task stopped");
 }
 
 /**************************************
