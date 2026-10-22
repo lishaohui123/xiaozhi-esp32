@@ -9,6 +9,7 @@
 #include <atomic>
 #include <string>
 #include <mutex>
+#include <condition_variable>
 #include <deque>
 #include <map>
 #include <memory>
@@ -148,6 +149,15 @@ public:
 
     void SetModeRealtime();
 
+    /**
+     * Close the audio channel and switch to idle from the main event loop.
+     *
+     * This is safe to call from any task. External tasks are blocked until the
+     * main loop has finished closing the channel and updating the state, which
+     * keeps all protocol/WebSocket operations serialized on one task.
+     */
+    void CloseAudioChannelAndGoIdle();
+
     QueueHandle_t touch_debounce_queue_;
     std::map<std::string, gpio_num_t> touch_pin_map_;
     std::atomic<bool> touch_task_busy_{false};
@@ -169,6 +179,9 @@ private:
 
     std::mutex mutex_;
     std::deque<std::function<void()>> main_tasks_;
+    std::mutex close_sync_mutex_;
+    std::condition_variable close_sync_cv_;
+    bool close_sync_done_ = false;
     std::unique_ptr<Protocol> protocol_;
     EventGroupHandle_t event_group_ = nullptr;
     esp_timer_handle_t clock_timer_handle_ = nullptr;
@@ -184,6 +197,7 @@ private:
     bool assets_version_checked_ = false;
     bool play_popup_on_listening_ = false;  // Flag to play popup sound after state changes to listening
     int clock_ticks_ = 0;
+    TaskHandle_t main_task_handle_ = nullptr;
     TaskHandle_t activation_task_handle_ = nullptr;
     static constexpr uint32_t UPDATE_FIRMWARE_STACK_SIZE = 1024 * 16;
     StackType_t* update_firmware_task_stack_ = nullptr;

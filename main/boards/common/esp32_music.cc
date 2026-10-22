@@ -1058,40 +1058,8 @@ void Esp32Music::PlayAudiosImpl(const std::string& work_id, std::vector<AudioInf
         DeviceState current_state = app.GetDeviceState();
         if (current_state == kDeviceStateListening) {
             ESP_LOGI(TAG, "Device is in listening state, switching to idle state for music playback");
-
-            // 1. 首先获取协议对象
-            Protocol* protocol = app.GetProtocol();
-            if (protocol && protocol->IsAudioChannelOpened()) {
-                // 2. 直接关闭音频通道（同步操作）
-                protocol->CloseAudioChannel();
-                ESP_LOGI(TAG, "Audio channel closed for music playback");
-                
-                // 3. 等待状态切换完成（增加延迟）
-                int wait_count = 0;
-                const int max_wait = 5; // 最多等待2秒
-                
-                while (wait_count < max_wait) {
-                    vTaskDelay(pdMS_TO_TICKS(100));
-                    current_state = app.GetDeviceState();
-                    
-                    if (current_state == kDeviceStateIdle) {
-                        ESP_LOGI(TAG, "Successfully switched to idle state after %d ms", wait_count * 100);
-                        break;
-                    }
-                    wait_count++;
-                }
-                
-                if (current_state != kDeviceStateIdle) {
-                    ESP_LOGW(TAG, "Failed to switch to idle state after %d ms, current state: %d", 
-                            wait_count * 100, current_state);
-                }
-            } else {
-                // 如果音频通道未打开，直接设置为空闲状态
-                ESP_LOGI(TAG, "Audio channel already closed, setting to idle state");
-                app.SetDeviceState(kDeviceStateIdle);
-                break;
-            }
-            
+            app.CloseAudioChannelAndGoIdle();
+            ESP_LOGI(TAG, "Audio channel closed for music playback");
             continue;
         }
         else if (current_state != kDeviceStateIdle) { // 不是待机状态，就一直卡在这里，不让播放音乐

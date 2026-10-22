@@ -17,6 +17,7 @@
 #include "constants.h"
 
 #include <cstring>
+#include <chrono>
 #include <map>
 #include <esp_log.h>
 #include <esp_heap_caps.h>
@@ -302,6 +303,8 @@ void Application::Initialize() {
 }
 
 void Application::Run() {
+    main_task_handle_ = xTaskGetCurrentTaskHandle();
+
     const EventBits_t ALL_EVENTS = 
         MAIN_EVENT_SCHEDULE |
         MAIN_EVENT_SEND_AUDIO |
@@ -1512,6 +1515,40 @@ void Application::Schedule(std::function<void()>&& callback) {
         main_tasks_.push_back(std::move(callback));
     }
     xEventGroupSetBits(event_group_, MAIN_EVENT_SCHEDULE);
+}
+
+void Application::CloseAudioChannelAndGoIdle() {
+    if (xTaskGetCurrentTaskHandle() == main_task_handle_) {
+        if (protocol_ && protocol_->IsAudioChannelOpened()) {
+            protocol_->CloseAudioChannel();
+        }
+        SetDeviceState(kDeviceStateIdle);
+        return;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(close_sync_mutex_);
+        close_sync_done_ = false;
+    }
+
+    Schedule([this]() {
+        if (protocol_ && protocol_->IsAudioChannelOpened()) {
+            protocol_->CloseAudioChannel();
+        }
+        SetDeviceState(kDeviceStateIdle);
+        {
+            std::lock_guard<std::mutex> lock(close_sync_mutex_);
+            close_sync_done_ = true;
+        }
+        close_sync_cv_.notify_all();
+    });
+
+    std::unique_lock<std::mutex> lock(close_sync_mutex_);
+    if (!close_sync_cv_.wait_for(lock, std::chrono::milliseconds(3000), [this]() {
+            return close_sync_done_;
+        })) {
+        ESP_LOGW(TAG, "Timed out waiting for audio channel close");
+    }
 }
 
 void Application::AbortSpeaking(AbortReason reason) {
