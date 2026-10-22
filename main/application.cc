@@ -936,6 +936,8 @@ void Application::TouchTask(void *arg) {
 
             // 正常对话时、电话时、播放故事时，都不触发的
             if ((kDeviceStateIdle == GetDeviceState()) && (Application::GetInstance().GetAudioService().is_voice_out_ == false)) {
+                application->touch_task_busy_.store(true);
+
                 {
                     SW_Vibrating(1);
                     esp_timer_start_once(touch_timer_handle_, 3000 * 1000);
@@ -945,6 +947,8 @@ void Application::TouchTask(void *arg) {
                     std::string touch_url = std::format("{}touch?deviceId={}&voiceType={}&region={}", OTA_URI, GloableVar::device_id, url_encode(GloableVar::voice_type), region);
                     Board::GetInstance().GetMusic()->PlayTouchAudio(touch_url);
                 }
+
+                application->touch_task_busy_.store(false);
             }
         }
         else {
@@ -961,9 +965,14 @@ void Application::TouchTask(void *arg) {
 // 对应头部
 static void IRAM_ATTR exit_TOUCH_1_isr_handler(void *arg)
 {
+    auto* application = static_cast<Application*>(arg);
+    if (application->touch_task_busy_.load()) {
+        return;
+    }
+
     TouchRegion region = TouchRegion::HEAD;
     BaseType_t higher_priority_task_woken = pdFALSE;
-    xQueueSendFromISR(static_cast<Application*>(arg)->touch_debounce_queue_, &region, &higher_priority_task_woken);
+    xQueueSendFromISR(application->touch_debounce_queue_, &region, &higher_priority_task_woken);
     if (higher_priority_task_woken) {
         portYIELD_FROM_ISR();
     }
@@ -971,9 +980,14 @@ static void IRAM_ATTR exit_TOUCH_1_isr_handler(void *arg)
 
 static void IRAM_ATTR exit_TOUCH_2_isr_handler(void *arg)
 {
+    auto* application = static_cast<Application*>(arg);
+    if (application->touch_task_busy_.load()) {
+        return;
+    }
+
     TouchRegion region = TouchRegion::HAND;
     BaseType_t higher_priority_task_woken = pdFALSE;
-    xQueueSendFromISR(static_cast<Application*>(arg)->touch_debounce_queue_, &region, &higher_priority_task_woken);
+    xQueueSendFromISR(application->touch_debounce_queue_, &region, &higher_priority_task_woken);
     if (higher_priority_task_woken) {
         portYIELD_FROM_ISR();
     }
@@ -981,9 +995,14 @@ static void IRAM_ATTR exit_TOUCH_2_isr_handler(void *arg)
 
 static void IRAM_ATTR exit_TOUCH_3_isr_handler(void *arg)
 {
+    auto* application = static_cast<Application*>(arg);
+    if (application->touch_task_busy_.load()) {
+        return;
+    }
+
     TouchRegion region = TouchRegion::CHEST;
     BaseType_t higher_priority_task_woken = pdFALSE;
-    xQueueSendFromISR(static_cast<Application*>(arg)->touch_debounce_queue_, &region, &higher_priority_task_woken);
+    xQueueSendFromISR(application->touch_debounce_queue_, &region, &higher_priority_task_woken);
     if (higher_priority_task_woken) {
         portYIELD_FROM_ISR();
     }

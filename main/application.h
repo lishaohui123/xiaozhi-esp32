@@ -6,6 +6,7 @@
 #include <freertos/task.h>
 #include <esp_timer.h>
 
+#include <atomic>
 #include <string>
 #include <mutex>
 #include <deque>
@@ -149,6 +150,7 @@ public:
 
     QueueHandle_t touch_debounce_queue_;
     std::map<std::string, gpio_num_t> touch_pin_map_;
+    std::atomic<bool> touch_task_busy_{false};
 
     std::deque<std::string> touch_task_queue_;
 

@@ -176,6 +176,7 @@ Esp32Music::~Esp32Music() {
     is_play_audios_status_ = 0;
     is_state_completed_ = 2; // 标记为强制完成
     prefetch_canceled_ = true;
+    CloseStreamingHttpClient();
     
     // 2. 通知所有等待的线程
     {
@@ -384,6 +385,7 @@ bool Esp32Music::Stop() {
     is_lyric_running_ = false;
     is_play_audios_status_ = 0;
     is_state_completed_ = 2; // 标记为强制完成
+    CloseStreamingHttpClient();
     
     // 2. 通知所有等待的线程
     {
@@ -1441,7 +1443,6 @@ bool Esp32Music::PlayVoice(const std::string& music_url, int repeat) {
     Protocol* protocol = application.GetProtocol();
     if (protocol && protocol->IsAudioChannelOpened()) {
         protocol->CloseAudioChannel();
-        vTaskDelay(pdMS_TO_TICKS(300));
     }
     application.SetDeviceState(kDeviceStateIdle);
 
@@ -1606,6 +1607,10 @@ std::string Esp32Music::GetWorkName() {
  **************************************************/
 void Esp32Music::ForceStopAllTasks() {
     ESP_LOGI(TAG, "Force stopping all tasks");
+    bool had_active_stream = is_downloading_.load() || is_playing_.load();
+    if (had_active_stream) {
+        CloseStreamingHttpClient();
+    }
     
     // 设置停止标志
     is_downloading_ = false;
@@ -2145,6 +2150,8 @@ bool Esp32Music::StopStreaming() {
         return true;
     }
 
+    CloseStreamingHttpClient();
+
     // 停止任务后，清空 AudioService 播放队列，避免旧音频继续从队列输出。
     Application::GetInstance().GetAudioService().ResetDecoder();
     
@@ -2414,6 +2421,31 @@ void Esp32Music::FreeAudioPacket(AudioStreamPacket* packet) {
 /****************************************
 * 具体执行下载音乐流的函数，在指定的URL进行下载
 ****************************************/
+std::shared_ptr<HttpClient> Esp32Music::GetOrCreateStreamingHttpClient() {
+    std::lock_guard<std::mutex> lock(streaming_http_client_mutex_);
+    if (streaming_http_client_) {
+        return streaming_http_client_;
+    }
+
+    auto http = Board::GetInstance().GetNetwork()->CreateHttp(0);
+    std::shared_ptr<Http> shared_http = std::move(http);
+    auto client = std::static_pointer_cast<HttpClient>(shared_http);
+    if (client) {
+        client->SetKeepAlive(true);
+        client->SetTimeout(8000);
+        streaming_http_client_ = client;
+    }
+    return client;
+}
+
+void Esp32Music::CloseStreamingHttpClient() {
+    std::lock_guard<std::mutex> lock(streaming_http_client_mutex_);
+    if (streaming_http_client_) {
+        streaming_http_client_->Close();
+        streaming_http_client_.reset();
+    }
+}
+
 void Esp32Music::DownloadAudioStreamImpl(const std::string& music_url, size_t initial_offset) {
     ESP_LOGI(TAG, "开始音频流下载 - 添加统计信息，music_url=%s", music_url.c_str());
   
@@ -2429,17 +2461,19 @@ void Esp32Music::DownloadAudioStreamImpl(const std::string& music_url, size_t in
     std::lock_guard<std::mutex> lock(stats_mutex_);
     total_downloaded_in_mp3_bytes = 0;  // 重置全局下载统计
     
-    // 创建 HTTP 客户端（只创建一次，重试时复用）
-    int connection_id = esp_random() % 10000;
-    auto http = Board::GetInstance().GetNetwork()->CreateHttp(connection_id);
-    std::shared_ptr<Http> shared_http = std::move(http);
-    std::shared_ptr<HttpClient> client = std::static_pointer_cast<HttpClient>(shared_http);
-    client->SetKeepAlive(true);
+    auto client = GetOrCreateStreamingHttpClient();
+    if (!client) {
+        ESP_LOGE(TAG, "创建 HTTP 客户端失败");
+        is_downloading_ = false;
+        return;
+    }
 
     // 连接辅助函数：offset > 0 时带 Range 请求头续传
-    auto connect_http = [&](size_t offset) -> int {
+    auto connect_http = [&](size_t offset, bool force_reconnect) -> int {
         for (int attempt = 0; attempt < 3; ++attempt) {
-            client->Close();
+            if (force_reconnect && attempt == 0) {
+                client->Close();
+            }
             if (offset > 0) {
                 client->SetHeader("Range", "bytes=" + std::to_string(offset) + "-");
             }
@@ -2455,11 +2489,10 @@ void Esp32Music::DownloadAudioStreamImpl(const std::string& music_url, size_t in
         return -1;
     };
 
-    int status_code = connect_http(initial_offset);
+    int status_code = connect_http(initial_offset, false);
     if (status_code != 200 && status_code != 206) {
         ESP_LOGE(TAG, "HTTP GET失败，状态码: %d", status_code);
-        client->Close();
-        client.reset();
+        CloseStreamingHttpClient();
         is_downloading_ = false;
         return;
     }
@@ -2492,6 +2525,7 @@ void Esp32Music::DownloadAudioStreamImpl(const std::string& music_url, size_t in
 
     const int max_retries = 3;  // 最多重试 3 次
     int retry_count = 0;
+    bool keep_connection = false;
 
     while (is_downloading_ && is_playing_ && retry_count <= max_retries) {
         // 🔥 速率控制检查
@@ -2512,7 +2546,7 @@ void Esp32Music::DownloadAudioStreamImpl(const std::string& music_url, size_t in
                          bytes_read, retry_count + 1, max_retries, local_downloaded_bytes);
 
                 retry_count++;
-                int retry_status = connect_http(initial_offset + local_downloaded_bytes);
+                int retry_status = connect_http(initial_offset + local_downloaded_bytes, true);
 
                 if (retry_status == 206) {
                     status_code = retry_status;
@@ -2530,6 +2564,7 @@ void Esp32Music::DownloadAudioStreamImpl(const std::string& music_url, size_t in
         }
         if (bytes_read == 0) {
             ESP_LOGI(TAG, "音频流下载完成，总共: %ld 字节", local_downloaded_bytes);
+            keep_connection = true;
             break;
         }
         
@@ -2691,8 +2726,11 @@ void Esp32Music::DownloadAudioStreamImpl(const std::string& music_url, size_t in
         taskYIELD();
    }
    
-   client->Close();
-   client.reset();
+   if (keep_connection) {
+       ESP_LOGI(TAG, "保留 HTTP 连接供后续复用");
+   } else {
+       CloseStreamingHttpClient();
+   }
    is_downloading_ = false;
    
    // 🔥 下载完成统计

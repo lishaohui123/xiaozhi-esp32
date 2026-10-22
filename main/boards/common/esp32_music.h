@@ -136,6 +136,8 @@ private:
     std::string current_music_url_;
     std::string current_song_name_;
     bool song_name_displayed_;
+    std::shared_ptr<HttpClient> streaming_http_client_;
+    std::mutex streaming_http_client_mutex_;
     
     // 歌词相关
     std::string current_lyric_url_;
@@ -225,6 +227,8 @@ private:
     bool mp3_decoder_initialized_;
     
     // 私有方法
+    std::shared_ptr<HttpClient> GetOrCreateStreamingHttpClient();
+    void CloseStreamingHttpClient();
     void DownloadAudioStreamImpl(const std::string& music_url, size_t initial_offset = 0);
     void PlayAudioStreamImpl();
     void ClearAudioBuffer();
