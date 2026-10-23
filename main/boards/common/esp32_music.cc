@@ -2724,6 +2724,13 @@ void Esp32Music::DownloadAudioStreamImpl(const std::string& music_url, size_t in
     };
 
     int status_code = connect_http(initial_offset, false);
+    if (status_code == 404) {
+        for (int retry = 0; retry < 3 && status_code == 404; ++retry) {
+            ESP_LOGW(TAG, "CDN 返回 404，尝试重连 %d/3", retry + 1);
+            vTaskDelay(pdMS_TO_TICKS(500));
+            status_code = connect_http(initial_offset, true);
+        }
+    }
     if (status_code != 200 && status_code != 206) {
         ESP_LOGE(TAG, "HTTP GET失败，状态码: %d", status_code);
         CloseStreamingHttpClient();
