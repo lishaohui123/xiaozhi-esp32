@@ -1190,6 +1190,13 @@ void VoiceCall::handle_device_set(const char* payload) {
     if (set_type == "volume") {
         int volume = cJSON_GetObjectItem(root, "number")->valueint;
 
+        // 做一些硬件上的限制
+        if (volume < 20) {
+            volume = 20;
+        } else if (volume > 100) {
+            volume = 100;
+        }
+
         auto codec = Board::GetInstance().GetAudioCodec();
         codec->SetOutputVolume(volume);
     }

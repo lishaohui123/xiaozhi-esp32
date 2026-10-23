@@ -142,9 +142,10 @@ void McpServer::AddCommonTools() {
         }), 
         [&board](const PropertyList& properties) -> ReturnValue {
             auto codec = board.GetAudioCodec();
-            codec->SetOutputVolume(properties["volume"].value<int>());
-            GloableVar::update_gloable_var(properties["volume"].value<int>());
-            return true;
+            int volume = properties["volume"].value<int>();
+            codec->SetOutputVolume(volume);
+            GloableVar::update_gloable_var(volume);
+            return "音量已设置为 " + std::to_string(volume) + "%。";
         });
 #endif
 
@@ -171,9 +172,18 @@ void McpServer::AddCommonTools() {
         }), 
         [&board](const PropertyList& properties) -> ReturnValue {
             auto codec = board.GetAudioCodec();
-            codec->SetOutputVolume(properties["volume"].value<int>());
-            GloableVar::update_gloable_var(properties["volume"].value<int>());
-            return true;
+            int volume = properties["volume"].value<int>();
+
+            // 做一些硬件上的限制
+            if (volume < 20) {
+                volume = 20;
+            } else if (volume > 100) {
+                volume = 100;
+            }
+
+            codec->SetOutputVolume(volume);
+            GloableVar::update_gloable_var(volume);
+            return "音量已设置为 " + std::to_string(volume) + "%。";
         });
 
 #if 0
