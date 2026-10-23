@@ -1053,6 +1053,10 @@ int Esp32Music::deleteWorkInfo(WorkInfo workInfo) {
     return ESP_OK;
 }
 
+int Esp32Music::IsWorkPlaying() {
+    return is_play_audios_status_.load();
+}
+
 /*************************************************************************************
  * [该任务是在一个线程中执行]
  * 先等待小智把话说完，切换到listen模式，然后强制切换到idle模式；
@@ -1089,7 +1093,10 @@ void Esp32Music::PlayAudiosImpl(const std::string& work_id, std::vector<AudioInf
             break;
         }
     }
-#endif    
+#endif
+
+    // 设置讲故事的表情
+    Board::GetInstance().GetDisplay()->SetEmotion("story");
 
     for (int32_t i = cur; i < audio_infos.size();  i++) {
         if (!audio_infos.at(i).play_url.empty()) {
@@ -1129,7 +1136,12 @@ void Esp32Music::PlayAudiosImpl(const std::string& work_id, std::vector<AudioInf
             }
         }
     }
-    is_play_audios_status_ = 0; // 复位播放的状态
+
+    // 复位播放的状态
+    is_play_audios_status_ = 0;
+
+    // 故事讲完后，恢复待命的表情
+    Board::GetInstance().GetDisplay()->SetEmotion("sleep");
 }
 
 /****************************************

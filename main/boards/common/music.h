@@ -13,6 +13,7 @@ class Music {
 public:
     virtual ~Music() = default;  // 添加虚析构函数
 
+    virtual int IsWorkPlaying() = 0;
     virtual bool Download(const std::string &song_name, bool restart) = 0;
     virtual bool Download(const std::string& work_id, std::vector<AudioInfo> audios, bool restart) = 0;
     virtual bool Play() = 0;

@@ -73,6 +73,8 @@ public:
     Esp32Music();
     ~Esp32Music();
 
+    int IsWorkPlaying();
+        
     // 共用函数
     std::string urlencode(const std::string &value);
 
