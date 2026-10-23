@@ -1450,13 +1450,13 @@ void Application::HandleStateChangedEvent() {
 
             if (CanEnterSleepMode() == true && isInit_ == false) {
                 auto music = board.GetMusic();
-                if (music->IsWorkPlaying() == 0) {  // 当正在播放故事时，不进行睡眠模式
+                if (music->IsWorkPlaying() == 0 && music->IsAudioPlaying() == 0) {  // 当正在播放故事时，不进行睡眠模式
                     board.GetDisplay()->SetEmotion("sleep");
                 }
             } else {
                 isInit_ = false;
                 auto music = board.GetMusic();
-                if (music->IsWorkPlaying() == 0) {  // 当正在播放故事时，不进行睡眠模式
+                if (music->IsWorkPlaying() == 0 && music->IsAudioPlaying() == 0) {  // 当正在播放故事时，不进行睡眠模式
                     board.GetDisplay()->SetEmotion("neutral");
                 }
             }

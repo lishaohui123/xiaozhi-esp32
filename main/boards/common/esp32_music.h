@@ -74,6 +74,7 @@ public:
     ~Esp32Music();
 
     int IsWorkPlaying();
+    int IsAudioPlaying();
         
     // 共用函数
     std::string urlencode(const std::string &value);
@@ -153,6 +154,7 @@ private:
     std::atomic<bool> prompt_playback_mode_;
     std::atomic<int> is_state_completed_;
     std::atomic<int> is_play_audios_status_;
+    std::atomic<int> is_play_audio_status_;
     int64_t current_play_time_ms_;  // 当前播放时间(毫秒)
     int64_t last_frame_time_ms_;    // 上一帧的时间戳
     int total_frames_decoded_;      // 已解码的帧数

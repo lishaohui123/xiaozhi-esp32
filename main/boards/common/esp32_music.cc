@@ -104,6 +104,7 @@ Esp32Music::Esp32Music() :
     prompt_playback_mode_(false),
     is_state_completed_(0),
     is_play_audios_status_(0),
+     is_play_audio_status_(0),
     current_play_time_ms_(0),
     last_frame_time_ms_(0),
     total_frames_decoded_(0),
@@ -174,6 +175,7 @@ Esp32Music::~Esp32Music() {
     is_playing_ = false;
     is_lyric_running_ = false;
     is_play_audios_status_ = 0;
+     is_play_audio_status_ = 0;
     is_state_completed_ = 2; // 标记为强制完成
     prefetch_canceled_ = true;
     CloseStreamingHttpClient();
@@ -364,6 +366,7 @@ Esp32Music::~Esp32Music() {
     current_lyric_index_ = -1;
     is_state_completed_ = 0;
     is_play_audios_status_ = 0;
+     is_play_audio_status_ = 0;
     current_play_time_ms_ = 0;
     last_frame_time_ms_ = 0;
     total_frames_decoded_ = 0;
@@ -401,6 +404,7 @@ bool Esp32Music::Stop() {
     is_playing_ = false;
     is_lyric_running_ = false;
     is_play_audios_status_ = 0;
+    is_play_audio_status_ = 0;
     is_state_completed_ = 2; // 标记为强制完成
     CloseStreamingHttpClient();
     
@@ -565,6 +569,7 @@ bool Esp32Music::Stop() {
     current_lyric_index_ = -1;
     is_state_completed_ = 0;
     is_play_audios_status_ = 0;
+     is_play_audio_status_ = 0,
     current_play_time_ms_ = 0;
     last_frame_time_ms_ = 0;
     total_frames_decoded_ = 0;
@@ -1684,6 +1689,11 @@ void Esp32Music::StopWorksAudio() {
         is_play_audios_status_ = 0;
         ESP_LOGI(TAG, "Stop works level play.");
     }
+    if (is_play_audio_status_ == 1) {
+        is_play_audio_status_ = 0;
+        ESP_LOGI(TAG, "Stop works level play.");
+    }
+        
     if (is_downloading_ || is_playing_) {
         is_downloading_ = false;
         is_playing_ = false;
@@ -1780,7 +1790,12 @@ void Esp32Music::PlayAudioTask(void* arg) {
     while (true) vTaskDelay(portMAX_DELAY);
 }
 
-void Esp32Music::PlayAudioImpl(const std::string& music_url) {
+int Esp32Music::IsAudioPlaying() { return is_play_audio_status_.load(); }
+
+void Esp32Music::PlayAudioImpl(const std::string &music_url) {
+    // 标记播放的状态
+    is_play_audio_status_ = 1;
+  
     /************************************
      * 关掉当前的对话，进入待命状态
      ************************************/
@@ -1793,10 +1808,19 @@ void Esp32Music::PlayAudioImpl(const std::string& music_url) {
     }
     application.SetDeviceState(kDeviceStateIdle);
 
+    // 设置讲故事的表情
+    Board::GetInstance().GetDisplay()->SetEmotion("story");
+
     /*********************
      * 流式的语音播报
      *********************/
     StartStreaming(music_url);
+
+    // 复位播放的状态
+    is_play_audio_status_ = 0;
+
+    // 故事讲完后，恢复待命的表情
+    Board::GetInstance().GetDisplay()->SetEmotion("sleep");
 }
 
 bool Esp32Music::Play() {
@@ -2346,6 +2370,7 @@ bool Esp32Music::StopStreaming() {
 
     // 停止作品级播放循环，这样切换新作品时旧作品不会继续播下一集。
     is_play_audios_status_ = 0;
+    is_play_audio_status_ = 0;
     is_state_completed_ = 2;
     prompt_playback_mode_ = false;
     CancelPrefetch();

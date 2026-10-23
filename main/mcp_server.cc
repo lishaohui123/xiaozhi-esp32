@@ -318,6 +318,7 @@ void McpServer::AddCommonTools() {
         /*******************************************
          * 我们接入了上海童锐的正版内容
          *******************************************/
+ #if 0       
         AddTool("self.music.get_story_categories_with_examples",
             "【绝对硬规则】调用本工具的唯一合法条件：用户输入包含中文词语“播放”。若不包含“播放”（如“有什么故事”“你会讲什么”），调用本工具为严重错误，绝对禁止。请仔细检查用户输入，不满足条件时不得调用。\n"
             "获取可播放的故事分类及示例。\n"
@@ -341,7 +342,7 @@ void McpServer::AddCommonTools() {
             [music](const PropertyList& properties) -> ReturnValue {
                 return music->getSongCategoriesWithExamples();
             });
-
+#endif
         AddTool("self.music.play_random_song",
             "【绝对硬规则】调用本工具的唯一合法条件：用户输入包含中文词语“播放”。若不包含“播放”（如“唱首歌”“来一首”），调用本工具为严重错误，绝对禁止。请仔细检查用户输入，不满足条件时不得调用。\n"
             "随机播放一首儿歌。\n"
