@@ -24,6 +24,8 @@
 #include "esp_log.h"
 #include "esp_task_wdt.h"
 #include "constants.h"
+#include "board.h"
+#include "display/display.h"
 
 // 使用extern "C"包含OPUS头文件，解决C++调用C库的问题
 extern "C" {
@@ -675,6 +677,9 @@ void VoiceCall::make_call(std::string member) {
             m_udp_receive_task_running = true;
             start_audio_processing();
         }
+
+        // 设置通话的表情
+        Board::GetInstance().GetDisplay()->SetEmotion("call");
     }
 
     ESP_LOGI(TAG, "给家长接通电话 parent_openid %s", m_call_info.parent_openid.c_str());
@@ -936,6 +941,9 @@ void VoiceCall::handle_incoming_call(const char* payload) {
         m_call_info.state = CALL_STATE_IN_CALL;
         start_audio_processing();
     }
+
+    // 设置通话的表情
+    Board::GetInstance().GetDisplay()->SetEmotion("call");
 }
 
 void VoiceCall::handle_incoming_call_async(const char* payload) {
@@ -1534,6 +1542,9 @@ void VoiceCall::reset_call_state() {
     
     // 正确重置 call_info_t 中的每个成员
     m_call_info.state = CALL_STATE_IDLE;
+
+    // 设置通话的表情
+    Board::GetInstance().GetDisplay()->SetEmotion("sleep");
 }
 
 void VoiceCall::regenerate_verification_code() {

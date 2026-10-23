@@ -2661,7 +2661,7 @@ std::shared_ptr<HttpClient> Esp32Music::GetOrCreateStreamingHttpClient() {
         return streaming_http_client_;
     }
 
-    auto http = Board::GetInstance().GetNetwork()->CreateHttp(0);
+    auto http = Board::GetInstance().GetNetwork()->CreateHttp(100);
     std::shared_ptr<Http> shared_http = std::move(http);
     auto client = std::static_pointer_cast<HttpClient>(shared_http);
     if (client) {

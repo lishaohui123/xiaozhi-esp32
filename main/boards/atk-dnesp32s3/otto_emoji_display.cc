@@ -286,6 +286,10 @@ void OttoEmojiDisplay::SetEmotion(const char *emotion) {
     else if (strcmp(emotion, "story") == 0) {
         mapped_emotion = "crying";
     }
+    // 增加通话的表情
+    else if (strcmp(emotion, "call") == 0) {
+        mapped_emotion = "winking";
+    }
     // ========================================================
 
     DisplayLockGuard lock(this);
