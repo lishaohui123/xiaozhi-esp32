@@ -823,6 +823,14 @@ void VoiceCall::handle_mqtt_message(const char* topic, const char* payload, int 
     char device_raisingsim_topic[64];   
     snprintf(device_raisingsim_topic, sizeof(device_raisingsim_topic), TOPIC_DEVICE_RAISINGSIM_TEMPLATE, m_device_info.device_id.c_str());
     if (strcmp(topic, device_raisingsim_topic) == 0) {
+        // 正在播喂养语音时，后续喂养消息直接丢弃，避免累积和播报跟不上
+        auto* music = Board::GetInstance().GetMusic();
+        if (auto* esp32_music = dynamic_cast<Esp32Music*>(music)) {
+            if (esp32_music->IsRaisingSimActive()) {
+                ESP_LOGI(TAG, "Dropping RaisingSim message while feeding voice is playing");
+                return;
+            }
+        }
         ScheduleMqttHandler(&VoiceCall::handle_device_raisingsim, payload);
         return;
     }
