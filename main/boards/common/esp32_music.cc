@@ -2025,11 +2025,6 @@ bool Esp32Music::StartStreaming(const std::string& music_url) {
         InitializeMp3Decoder();
     }
 
-    if (playback_stop_requested_) {
-        ESP_LOGI(TAG, "播报被新请求中断，不创建本轮流式任务");
-        return true;
-    }
-
     is_downloading_ = true;
     is_playing_ = true;
 
