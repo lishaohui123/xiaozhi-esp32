@@ -1255,8 +1255,13 @@ bool Esp32Music::Download(const std::string& work_name, bool restart) {
         return false;
     }
 
+    WorkInfo workInfo;
     std::string work_id = std::string(cJSON_GetObjectItem(data, "workId")->valuestring);
     std::string workName = std::string(cJSON_GetObjectItem(data, "workName")->valuestring);
+
+    workInfo.audioId = std::string(cJSON_GetObjectItem(data, "audioId")->valuestring);
+    workInfo.completed = cJSON_GetObjectItem(data, "completed")->valueint;
+    workInfo.workId = work_id;
     work_name_ = workName;
 
     std::vector<AudioInfo> audios;
@@ -1282,138 +1287,17 @@ bool Esp32Music::Download(const std::string& work_name, bool restart) {
         auto music = Board::GetInstance().GetMusic();
         music->StopStreaming();
 
-        music->Download(work_id, audios, false);
+        music->Download(work_id, audios, workInfo, false);
     }
 
     return true;
 }
 
-
-#if 0
-bool Esp32Music::Download(const std::string& work_name, bool restart) {
-    ESP_LOGI(TAG, "Starting to get works for: %s", work_name.c_str());
-
-    // 清空之前的下载数据
-    last_downloaded_data_.clear();
-
-    // 查询作品信息
-    if (!FindWork(work_name)) {
-        return false;
-    }
-
-    if (!last_downloaded_data_.empty()) {
-        std::string work_id = ParseWorkId();
-        if (!work_id.empty()) {
-            // 查询作品详情，获取音频url
-            if (FindWorkDetail(work_id)) {
-                std::vector<AudioInfo> audio_infos = ParseWorkDetail();
-                if (audio_infos.size() != 0) {
-                    // 查询当前作品讲到了第几集
-                    int cur = 0;
-                    if (audio_infos.size() > 1) {
-                        if (!restart) {
-                            WorkInfo workInfo = GetWorkInfo(work_id);
-                            std::string audio_id = workInfo.audioId;
-                            int32_t completed = workInfo.completed;
-
-                            if (!audio_id.empty()) {
-                                for (int32_t i = 0; i < audio_infos.size();  i++) {
-                                    if (audio_id == audio_infos.at(i).id) {
-                                        if ((i == (audio_infos.size() - 1)) && (completed == 1)) {
-                                            // 最后一集讲完，从头开始讲
-                                            cur = 0;
-                                            break;
-                                        }
-                                        cur = i;
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    ESP_LOGI(TAG, "作品第几集 %d", cur);
-
-                    // 把讲故事交给一个线程
-                    PlayAudiosTaskParams* params = new PlayAudiosTaskParams{
-                        this, work_id, audio_infos, cur
-                    };
-                    
-                    /******************************************
-                     * 如果处于音频播放，则结束播放
-                     *******************************************/
-                    StopWorksAudio();
-
-                    // 停止之前的音频播放任务（如果有）
-                    if (play_audios_task_handle_ != nullptr) {
-                        if (play_audios_task_static_allocated_) {
-                            vTaskDelete(play_audios_task_handle_);
-                            play_audios_task_static_allocated_ = false;
-                            ESP_LOGI(TAG, "Deleted previous static play audio task");
-                        } 
-                        play_audios_task_handle_ = nullptr;
-                    }
-#if 1
-                    // 改为静态分配内存
-                    if (play_audios_task_stack_ == nullptr) {
-                        play_audios_task_stack_ = (StackType_t*)heap_caps_malloc(1024 * 8 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
-                        assert(play_audios_task_stack_ != nullptr);
-                    }
-
-                    if (play_audios_task_tcb_ == nullptr) {
-                        play_audios_task_tcb_ = (StaticTask_t*)heap_caps_malloc(sizeof(StaticTask_t), MALLOC_CAP_INTERNAL);
-                        assert(play_audios_task_tcb_ != nullptr);
-                    }
-#endif
-#if 0
-                    xTaskCreatePinnedToCore(PlayAudiosTask, "play_audios", 1024 * 8, params, 1, &play_audios_task_handle_, 1);
-#endif
-#if 1
-                    // 创建播放音频任务
-                    play_audios_task_handle_ = xTaskCreateStatic(
-                        PlayAudiosTask,
-                        "play_audios",
-                        1024 * 8,
-                        params,
-                        1,
-                        play_audios_task_stack_,
-                        play_audios_task_tcb_
-                    );
-#endif
-                    assert(play_audios_task_handle_ != nullptr);
-
-                    play_audios_task_static_allocated_ = true;
-                    ESP_LOGI(TAG, "Static play audios task created successfully");
-                    return true;
-                }
-                else {
-                    ESP_LOGE(TAG, "作品下面没有音频");
-                    return false;
-                }
-            }
-            else {
-                ESP_LOGE(TAG, "作品下面没有音频"); 
-                return false;
-            }
-        }
-        else {
-            ESP_LOGE(TAG, "没有找到作品 '%s'", work_name.c_str());
-            return false;
-        }
-    }
-    else {
-        ESP_LOGE(TAG, "Empty response from works API");
-        return false;
-    }  
-    return false;
-}
-#endif
-
 /****************************************
  * 为了加速点播的速度，小程序直接
  * 发送的是音频的url
  ****************************************/
-bool Esp32Music::Download(const std::string& work_id, std::vector<AudioInfo> audios, bool restart) {
+bool Esp32Music::Download(const std::string& work_id, std::vector<AudioInfo> audios, WorkInfo workInfo, bool restart) {
     if (audios.size() != 0) {
         // 查询当前作品讲到了第几集
         int cur = 0;
@@ -1425,12 +1309,15 @@ bool Esp32Music::Download(const std::string& work_id, std::vector<AudioInfo> aud
                     vTaskDelay(pdMS_TO_TICKS(20));
                     waited_ms += 20;
                 }
+#if 0
                 if (prepared_ready_.load()) {
                     cur = prepared_cur_.load();
                 } else {
                     WorkInfo workInfo = GetWorkInfo(work_id);
                     cur = ComputeStartIndex(workInfo, audios);
                 }
+#endif
+                cur = ComputeStartIndex(workInfo, audios);
             }
         }
 
@@ -4851,8 +4738,13 @@ bool Esp32Music::PlayRandomByCategory(std::string content) {
         return false;
     }
 
+    WorkInfo workInfo;
     std::string work_id = std::string(cJSON_GetObjectItem(data, "workId")->valuestring);
     std::string work_name = std::string(cJSON_GetObjectItem(data, "workName")->valuestring);
+
+    workInfo.audioId = std::string(cJSON_GetObjectItem(data, "audioId")->valuestring);
+    workInfo.completed = cJSON_GetObjectItem(data, "completed")->valueint;
+    workInfo.workId = work_id;
     work_name_ = work_name;
 
     std::vector<AudioInfo> audios;
@@ -4879,7 +4771,7 @@ bool Esp32Music::PlayRandomByCategory(std::string content) {
         auto music = Board::GetInstance().GetMusic();
         music->StopStreaming();
 
-        music->Download(work_id, audios, false);
+        music->Download(work_id, audios, workInfo, false);
     }
 
     return true;

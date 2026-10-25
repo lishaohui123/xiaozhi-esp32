@@ -30,14 +30,6 @@ struct AudioChunk {
     AudioChunk(uint8_t *d, size_t s) : data(d), size(s) {}
 };
 
-struct WorkInfo {
-    uint64_t id;
-    std::string deviceId;
-    std::string workId;
-    std::string audioId;
-    uint32_t completed;
-};
-
 struct categorie {
     uint64_t id;
     std::string name;
@@ -106,7 +98,7 @@ public:
 
 	// impliments functions
     virtual bool Download(const std::string &song_name, bool restart) override;
-    virtual bool Download(const std::string& work_id, std::vector<AudioInfo> audios, bool restart) override;
+    virtual bool Download(const std::string& work_id, std::vector<AudioInfo> audios, WorkInfo workInfo, bool restart) override;
     virtual bool Play() override;
     virtual bool Play(const std::string& music_url, int repeat) override;
     virtual bool PlayVoice(const std::string& music_url, int repeat) override;

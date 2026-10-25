@@ -9,6 +9,14 @@ struct AudioInfo {
     int status;
 };
 
+struct WorkInfo {
+    uint64_t id;
+    std::string deviceId;
+    std::string workId;
+    std::string audioId;
+    uint32_t completed;
+};
+
 class Music {
 public:
     virtual ~Music() = default;  // 添加虚析构函数
@@ -16,7 +24,7 @@ public:
     virtual int IsWorkPlaying() = 0;
     virtual int IsAudioPlaying() = 0;
     virtual bool Download(const std::string &song_name, bool restart) = 0;
-    virtual bool Download(const std::string& work_id, std::vector<AudioInfo> audios, bool restart) = 0;
+    virtual bool Download(const std::string& work_id, std::vector<AudioInfo> audios, WorkInfo workInfo, bool restart) = 0;
     virtual bool Play() = 0;
     virtual bool Play(const std::string& music_url, int repeat) = 0;
     virtual bool PlayVoice(const std::string& music_url, int repeat) = 0;

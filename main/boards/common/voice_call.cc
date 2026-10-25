@@ -1106,8 +1106,13 @@ void VoiceCall::handle_device_works2(const char* payload) {
         return;
     }
 
+    WorkInfo workInfo;
     std::string work_id = std::string(cJSON_GetObjectItem(root, "workId")->valuestring);
     std::string work_name = std::string(cJSON_GetObjectItem(root, "workName")->valuestring);
+
+    workInfo.audioId = std::string(cJSON_GetObjectItem(root, "audioId")->valuestring);
+    workInfo.completed = cJSON_GetObjectItem(root, "completed")->valueint;
+    workInfo.workId = work_id;
 
     std::vector<AudioInfo> audios;
     cJSON* audios_array = cJSON_GetObjectItem(root, "audios");
@@ -1138,23 +1143,8 @@ void VoiceCall::handle_device_works2(const char* payload) {
 #if 0
         // 在播报提示音期间，后台解析当前集并预取第一集音频，缩短故事起播等待
         music->PrefetchFirstAudio(work_id, audios, false);
-
-        // 增加语音播放，来提升用户体验
-        {
-            std::string s = "小主人，马上为你播放 " + work_name;
-            auto& alarm_manager = AlarmManager::GetInstance();
-            alarm_manager.PlayTtsAudioStreamVoice(s, 1);
-        }
 #endif
-
-        // 增加语音播放，来提升用户体验
-        {
-            std::string s = "小主人，马上为你播放 " + work_name;
-            auto& alarm_manager = AlarmManager::GetInstance();
-            alarm_manager.PlayTtsAudioStreamVoice(s, 1);
-        }
-
-        music->Download(work_id, audios, false);
+        music->Download(work_id, audios, workInfo, false);
     }
 }
 
