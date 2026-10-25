@@ -1141,6 +1141,14 @@ void VoiceCall::handle_device_works2(const char* payload) {
             alarm_manager.PlayTtsAudioStreamVoice(s, 1);
         }
 #endif
+
+        // 增加语音播放，来提升用户体验
+        {
+            std::string s = "小主人，马上为你播放 " + work_name;
+            auto& alarm_manager = AlarmManager::GetInstance();
+            alarm_manager.PlayTtsAudioStreamVoice(s, 1);
+        }
+
         music->Download(work_id, audios, false);
     }
 }
