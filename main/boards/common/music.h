@@ -37,6 +37,7 @@ public:
     virtual bool StartStreaming(const std::string& music_url) = 0;
     virtual bool StartStreamingPrompt(const std::string& music_url) = 0;
     virtual bool StopStreaming() = 0;  // 停止流式播放
+    virtual void StopBroadcast() = 0;  // 进入通话前干净打断语音播报
     virtual size_t GetBufferSize() const = 0;
     virtual bool IsDownloading() const = 0;
     virtual bool IsPlaying() const = 0;

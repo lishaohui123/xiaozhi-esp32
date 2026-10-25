@@ -1742,6 +1742,11 @@ void Esp32Music::RequestStopCurrentStreaming() {
     }
 }
 
+void Esp32Music::StopBroadcast() {
+    // 通话入口调用：不阻塞、不删除任务，只请求当前播报干净退出。
+    RequestStopCurrentStreaming();
+}
+
 /*****************************************
  * 支持家长端的歌曲点播
  * 防止阻塞mqtt，采用异步的方式

@@ -443,6 +443,11 @@ void VoiceCall::initUdp() {
 void VoiceCall::start_audio_processing() {
     ESP_LOGI(TAG, "Starting audio processing");
 
+    // 进入通话前，先干净停止正在进行的语音播报，避免和通话音频冲突
+    if (auto* music = Board::GetInstance().GetMusic()) {
+        music->StopBroadcast();
+    }
+
     {
         m_udp_receive_task_running = true;
         m_udp_send_task_running = true;
