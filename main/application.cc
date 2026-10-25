@@ -16,6 +16,7 @@
 #include "iot/iot.h"
 #include "constants.h"
 
+#include <cassert>
 #include <cstring>
 #include <chrono>
 #include <map>
@@ -114,30 +115,6 @@ Application::Application() {
         .arg = this,
     };
     esp_timer_create(&touch_timer_args, &touch_timer_handle_);
-
-    update_firmware_task_stack_ = (StackType_t*)heap_caps_malloc(
-        UPDATE_FIRMWARE_STACK_SIZE * sizeof(StackType_t),
-        MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT
-    );
-    update_firmware_task_tcb_ = (StaticTask_t*)heap_caps_malloc(
-        sizeof(StaticTask_t),
-        MALLOC_CAP_INTERNAL
-    );
-
-    if (update_firmware_task_stack_ == nullptr || update_firmware_task_tcb_ == nullptr) {
-        update_firmware_task_static_ = false;
-        ESP_LOGW(TAG, "Reserve update firmware internal stack failed, fallback to dynamic task");
-        if (update_firmware_task_stack_ != nullptr) {
-            heap_caps_free(update_firmware_task_stack_);
-            update_firmware_task_stack_ = nullptr;
-        }
-        if (update_firmware_task_tcb_ != nullptr) {
-            heap_caps_free(update_firmware_task_tcb_);
-            update_firmware_task_tcb_ = nullptr;
-        }
-    } else {
-        update_firmware_task_static_ = true;
-    }
 }
 
 Application::~Application() {
@@ -153,20 +130,8 @@ Application::~Application() {
         vQueueDelete(touch_debounce_queue_);
     }
     if (update_firmware_task_handle_ != nullptr) {
-        if (update_firmware_task_static_) {
-            vTaskDelete(update_firmware_task_handle_);
-        } else {
-            vTaskDeleteWithCaps(update_firmware_task_handle_);
-        }
+        vTaskDeleteWithCaps(update_firmware_task_handle_);
         update_firmware_task_handle_ = nullptr;
-    }
-    if (update_firmware_task_stack_ != nullptr) {
-        heap_caps_free(update_firmware_task_stack_);
-        update_firmware_task_stack_ = nullptr;
-    }
-    if (update_firmware_task_tcb_ != nullptr) {
-        heap_caps_free(update_firmware_task_tcb_);
-        update_firmware_task_tcb_ = nullptr;
     }
     vEventGroupDelete(event_group_);
 }
@@ -695,11 +660,7 @@ void Application::UpdateFirmwareTask() {
             ESP_LOGW(TAG, "UpdateFirmwareTask task already running");
             return;
         }
-        if (update_firmware_task_static_) {
-            vTaskDelete(update_firmware_task_handle_);
-        } else {
-            vTaskDeleteWithCaps(update_firmware_task_handle_);
-        }
+        vTaskDeleteWithCaps(update_firmware_task_handle_);
         update_firmware_task_handle_ = nullptr;
     }
 
@@ -711,25 +672,8 @@ void Application::UpdateFirmwareTask() {
         }
     };
 
-    if (update_firmware_task_stack_ != nullptr && update_firmware_task_tcb_ != nullptr) {
-        update_firmware_task_handle_ = xTaskCreateStatic(
-            update_firmware_task,
-            "update_ota",
-            UPDATE_FIRMWARE_STACK_SIZE,
-            this,
-            2,
-            update_firmware_task_stack_,
-            update_firmware_task_tcb_
-        );
-        if (update_firmware_task_handle_ == nullptr) {
-            ESP_LOGE(TAG, "Failed to create update firmware task");
-            return;
-        }
-        update_firmware_task_static_ = true;
-        ESP_LOGI(TAG, "Update firmware task created from reserved memory");
-        return;
-    }
-
+    // OTA 升级会经 esp_partition_mmap 冻结 cache，任务栈必须用内部 RAM；
+    // 放 PSRAM 会在 s_task_stack_is_sane_when_cache_frozen() 处断言失败。
     BaseType_t ret = xTaskCreateWithCaps(
         update_firmware_task,
         "update_ota",
@@ -742,8 +686,7 @@ void Application::UpdateFirmwareTask() {
     if (ret != pdPASS) {
         update_firmware_task_handle_ = nullptr;
         ESP_LOGE(TAG, "Failed to allocate update firmware task stack: %u bytes", UPDATE_FIRMWARE_STACK_SIZE);
-    } else {
-        update_firmware_task_static_ = false;
+        assert(false);
     }
 }
 
