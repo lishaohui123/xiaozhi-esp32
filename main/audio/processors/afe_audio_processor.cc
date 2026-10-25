@@ -130,7 +130,12 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, int frame_duration_ms, srm
     char* ns_model_name = esp_srmodel_filter(models, ESP_NSNET_PREFIX, NULL);
     char* vad_model_name = esp_srmodel_filter(models, ESP_VADN_PREFIX, NULL);
     
-    afe_config_t* afe_config = afe_config_init(input_format.c_str(), NULL, AFE_TYPE_VC, AFE_MODE_HIGH_PERF);
+    // 注意：esp-sr 的 esp_afe_sr_1mic 内部只用 afe_mode（即这里的第 4 个参数）
+    // 来选择 AEC 算法，aec_mode 字段实际上不会被读取。
+    // AFE_MODE_HIGH_PERF 会调用 esp_aec3_process，在通话中处理 32ms 一帧耗时超过
+    // 帧周期，导致 audio_input 任务一直占着 CPU0，饿死 IDLE0 从而触发看门狗。
+    // 这里必须用 AFE_MODE_LOW_COST，让 AEC 走 esp_aec3_728_process 这条低开销路径。
+    afe_config_t* afe_config = afe_config_init(input_format.c_str(), NULL, AFE_TYPE_VC, AFE_MODE_LOW_COST);
     afe_config->aec_mode = AEC_MODE_VOIP_LOW_COST;
     afe_config->vad_mode = VAD_MODE_0;
     afe_config->vad_min_noise_ms = 2000;
