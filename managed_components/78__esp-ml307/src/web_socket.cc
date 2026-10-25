@@ -260,6 +260,12 @@ void WebSocket::Close() {
     }
 }
 
+void WebSocket::Disconnect() {
+    if (tcp_) {
+        tcp_->Disconnect();
+    }
+}
+
 void WebSocket::OnConnected(std::function<void()> callback) {
     on_connected_ = callback;
 }

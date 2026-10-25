@@ -28,6 +28,8 @@ bool WebsocketProtocol::Start() {
 }
 
 bool WebsocketProtocol::SendAudio(std::unique_ptr<AudioStreamPacket> packet) {
+    std::lock_guard<std::mutex> lock(websocket_mutex_);
+
     if (websocket_ == nullptr || !websocket_->IsConnected()) {
         return false;
     }
@@ -60,6 +62,8 @@ bool WebsocketProtocol::SendAudio(std::unique_ptr<AudioStreamPacket> packet) {
 }
 
 bool WebsocketProtocol::SendText(const std::string& text) {
+    std::lock_guard<std::mutex> lock(websocket_mutex_);
+
     if (websocket_ == nullptr || !websocket_->IsConnected()) {
         return false;
     }
@@ -74,21 +78,13 @@ bool WebsocketProtocol::SendText(const std::string& text) {
 }
 
 bool WebsocketProtocol::IsAudioChannelOpened() const {
+    std::lock_guard<std::mutex> lock(websocket_mutex_);
+
     return websocket_ != nullptr && websocket_->IsConnected() && !error_occurred_ && !IsTimeout();
 }
 
 void WebsocketProtocol::CloseAudioChannel() {
     CleanupWebSocket();
-
-    websocket_.reset();
-
-    /****************************
-     * 为了解决第二次不能
-     * 正常唤醒的问题
-     ****************************/
-    error_occurred_ = false;
-    session_id_.clear();
-    last_incoming_time_ = std::chrono::steady_clock::now();
 }
 
 bool WebsocketProtocol::OpenAudioChannel() {
@@ -116,24 +112,26 @@ bool WebsocketProtocol::OpenAudioChannel() {
 
     auto network = Board::GetInstance().GetNetwork();
     int connection_id = esp_random() % 1000;
-    websocket_ = network->CreateWebSocket(connection_id);
-    if (websocket_ == nullptr) {
-        ESP_LOGE(TAG, "Failed to create websocket");
-        return false;
-    }
-
-    if (!token.empty()) {
-        // If token not has a space, add "Bearer " prefix
-        if (token.find(" ") == std::string::npos) {
-            token = "Bearer " + token;
+    {
+        std::lock_guard<std::mutex> lock(websocket_mutex_);
+        websocket_ = network->CreateWebSocket(connection_id);
+        if (websocket_ == nullptr) {
+            ESP_LOGE(TAG, "Failed to create websocket");
+            return false;
         }
-        websocket_->SetHeader("Authorization", token.c_str());
-    }
-    websocket_->SetHeader("Protocol-Version", std::to_string(version_).c_str());
-    websocket_->SetHeader("Device-Id", SystemInfo::GetMacAddress().c_str());
-    websocket_->SetHeader("Client-Id", Board::GetInstance().GetUuid().c_str());
 
-    websocket_->OnData([this](const char* data, size_t len, bool binary) {
+        if (!token.empty()) {
+            // If token not has a space, add "Bearer " prefix
+            if (token.find(" ") == std::string::npos) {
+                token = "Bearer " + token;
+            }
+            websocket_->SetHeader("Authorization", token.c_str());
+        }
+        websocket_->SetHeader("Protocol-Version", std::to_string(version_).c_str());
+        websocket_->SetHeader("Device-Id", SystemInfo::GetMacAddress().c_str());
+        websocket_->SetHeader("Client-Id", Board::GetInstance().GetUuid().c_str());
+
+        websocket_->OnData([this](const char* data, size_t len, bool binary) {
         if (binary) {
             if (on_incoming_audio_ != nullptr) {
                 if (version_ == 2) {
@@ -187,14 +185,15 @@ bool WebsocketProtocol::OpenAudioChannel() {
             cJSON_Delete(root);
         }
         last_incoming_time_ = std::chrono::steady_clock::now();
-    });
+        });
 
-    websocket_->OnDisconnected([this]() {
-        ESP_LOGI(TAG, "Websocket disconnected");
-        if (on_audio_channel_closed_ != nullptr) {
-            on_audio_channel_closed_();
-        }
-    });
+        websocket_->OnDisconnected([this]() {
+            ESP_LOGI(TAG, "Websocket disconnected");
+            if (on_audio_channel_closed_ != nullptr) {
+                on_audio_channel_closed_();
+            }
+        });
+    }
 
     ESP_LOGI(TAG, "Connecting to websocket server: %s with version: %d", url.c_str(), version_);
     if (!websocket_->Connect(url.c_str())) {
@@ -280,21 +279,25 @@ void WebsocketProtocol::ParseServerHello(const cJSON* root) {
 void WebsocketProtocol::CleanupWebSocket() {
     if (is_cleaning_up_) return;
     is_cleaning_up_ = true;
-    
+
     // 1. 先取消所有回调
-    if (websocket_) {
-        websocket_->OnData(nullptr);
-        websocket_->OnDisconnected(nullptr);
-        websocket_->OnError(nullptr);
-        
-        // 2. 优雅关闭连接
-        websocket_->Close();
-        
-        // 3. 延迟释放，确保关闭完成
-        vTaskDelay(pdMS_TO_TICKS(100));
-        
-        // 4. 重置指针
-        websocket_.reset();
+    {
+        std::lock_guard<std::mutex> lock(websocket_mutex_);
+        if (websocket_) {
+            // 先清理不会被接收任务使用的断开/错误回调，保持原有通知行为。
+            websocket_->OnDisconnected(nullptr);
+            websocket_->OnError(nullptr);
+
+            // 断开 TCP 并等待接收任务真正退出，避免接收任务仍在使用 on_data_ 回调时
+            // 就销毁 WebSocket 导致 use-after-free。
+            websocket_->Disconnect();
+
+            // 接收任务已退出，再清理数据回调。
+            websocket_->OnData(nullptr);
+
+            // 重置指针
+            websocket_.reset();
+        }
     }
     
     // 5. 重置事件组

@@ -26,6 +26,7 @@ public:
     bool Send(const void* data, size_t len, bool binary = false, bool fin = true);
     void Ping();
     void Close();
+    void Disconnect();
 
     void OnConnected(std::function<void()> callback);
     void OnDisconnected(std::function<void()> callback);

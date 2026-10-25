@@ -7,6 +7,7 @@
 #include <web_socket.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
+#include <mutex>
 
 #define WEBSOCKET_PROTOCOL_SERVER_HELLO_EVENT (1 << 0)
 
@@ -24,6 +25,7 @@ public:
 private:
     EventGroupHandle_t event_group_handle_;
     std::unique_ptr<WebSocket> websocket_;
+    mutable std::mutex websocket_mutex_;
     int version_ = 1;
 
     void ParseServerHello(const cJSON* root);
