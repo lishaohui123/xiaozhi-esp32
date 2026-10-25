@@ -1731,6 +1731,8 @@ void Esp32Music::RequestStopCurrentStreaming() {
     playback_stop_requested_ = true;
     is_state_completed_ = 2;
     prompt_playback_mode_ = false;
+    is_play_audios_status_ = 0;
+    is_play_audio_status_ = 0;
     is_downloading_ = false;
     is_playing_ = false;
 
@@ -2419,7 +2421,7 @@ bool Esp32Music::StopStreaming() {
 
     // 重置采样率到原始值
     ResetSampleRate();
-    
+
     // 检查是否有流式播放正在进行
     if (!is_playing_ && !is_downloading_) {
         ESP_LOGW(TAG, "No streaming in progress");
@@ -2430,7 +2432,7 @@ bool Esp32Music::StopStreaming() {
 
     // 停止任务后，清空 AudioService 播放队列，避免旧音频继续从队列输出。
     Application::GetInstance().GetAudioService().ResetDecoder();
-    
+
     // 停止下载和播放标志
     is_downloading_ = false;
     is_playing_ = false;
@@ -2440,7 +2442,7 @@ bool Esp32Music::StopStreaming() {
         std::lock_guard<std::mutex> lock(buffer_mutex_);
         buffer_cv_.notify_all();
     }
-    
+
     // 等播放线程自然结束，而不是在它执行过程中直接删除它。
     // PlayAudioStream() 退出后会打印播放完成统计，然后任务包装函数
     // 设置 is_played 并发送 play-complete 事件。
@@ -2456,7 +2458,7 @@ bool Esp32Music::StopStreaming() {
     if (!download_finished && download_task_handle_ != nullptr) {
         ESP_LOGW(TAG, "Download task did not finish naturally, force deleting");
     }
-    
+
     // 删除播放任务（处理静态分配）
     if (play_task_handle_ != nullptr) {
         if (play_task_static_allocated_) {
@@ -2469,7 +2471,7 @@ bool Esp32Music::StopStreaming() {
         }
         play_task_handle_ = nullptr;
     }
-    
+
     // 删除下载任务
     if (download_task_handle_ != nullptr) {
         if (download_task_static_allocated_) {
