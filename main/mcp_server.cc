@@ -615,10 +615,10 @@ void McpServer::AddCommonTools() {
             }
         }
         
-        // ============ 调用AddAlarm ============
-        // 注意：parsed_time必须是纯时间格式（HH:MM）或相对时间字符串
-        // parsed_weekdays包含日期信息（如果有时）
-        alarm_manager.AddAlarm(parsed_time, message, parsed_weekdays, true);
+        // 异步提交，主线程立即返回，实际数据库写入由 AlarmManager 后台任务完成
+        if (!alarm_manager.AddAlarmAsync(parsed_time, message, parsed_weekdays, true)) {
+            return "{\"success\": false, \"message\": \"时间格式不正确，请使用HH:MM格式或中文时间表达\"}";
+        }
         
         // 构建响应信息
         std::string response = "{\"success\": true, \"message\": \"闹钟设置成功\", \"details\": {";
@@ -670,7 +670,9 @@ void McpServer::AddCommonTools() {
                 }
             }
             
-            alarm_manager.AddAlarm(time, message, weekdays, true);
+            if (!alarm_manager.AddAlarmAsync(time, message, weekdays, true)) {
+                return "{\"success\": false, \"message\": \"时间格式不正确\"}";
+            }
 
             return "{\"success\": true, \"message\": \"闹钟增加成功\"}";
         });
@@ -696,7 +698,9 @@ void McpServer::AddCommonTools() {
             bool enabled = properties["enabled"].value<bool>();
             
             auto& alarm_manager = AlarmManager::GetInstance();
-            alarm_manager.AddAlarm(time, message, "holiday", true);
+            if (!alarm_manager.AddAlarmAsync(time, message, "holiday", true)) {
+                return "{\"success\": false, \"message\": \"时间格式不正确\"}";
+            }
 
             return "{\"success\": true, \"message\": \"闹钟增加成功\"}";
         });
@@ -722,7 +726,9 @@ void McpServer::AddCommonTools() {
             bool enabled = properties["enabled"].value<bool>();
             
             auto& alarm_manager = AlarmManager::GetInstance();
-            alarm_manager.AddAlarm(time, message, "weekend", true);
+            if (!alarm_manager.AddAlarmAsync(time, message, "weekend", true)) {
+                return "{\"success\": false, \"message\": \"时间格式不正确\"}";
+            }
 
             return "{\"success\": true, \"message\": \"闹钟增加成功\"}";
         });
@@ -749,7 +755,9 @@ void McpServer::AddCommonTools() {
             bool enabled = properties["enabled"].value<bool>();
             
             auto& alarm_manager = AlarmManager::GetInstance();
-            alarm_manager.AddAlarm(time, message, "daily", true);
+            if (!alarm_manager.AddAlarmAsync(time, message, "daily", true)) {
+                return "{\"success\": false, \"message\": \"时间格式不正确\"}";
+            }
 
             return "{\"success\": true, \"message\": \"闹钟增加成功\"}";
         });
@@ -777,8 +785,9 @@ void McpServer::AddCommonTools() {
             
             auto& alarm_manager = AlarmManager::GetInstance();
             
-            // 这里直接调用 AddAlarm，因为它现在会自动检测相对时间
-            alarm_manager.AddAlarm(relative_time, message, "", true);
+            if (!alarm_manager.AddAlarmAsync(relative_time, message, "", true)) {
+                return "{\"success\": false, \"message\": \"时间格式不正确\"}";
+            }
 
             return "{\"success\": true, \"message\": \"闹钟增加成功\"}";
         });

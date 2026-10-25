@@ -4,6 +4,8 @@
 #include <string>
 #include <functional>
 #include <vector>
+#include <memory>
+#include <mutex>
 #include "board.h"
 #include "alarm.h"
 #include "http_client.h"
@@ -46,6 +48,8 @@ private:
     std::string api_url_;
     std::string device_id_;
     bool initialized_;
+    std::unique_ptr<Http> http_;
+    std::mutex http_mutex_;
 };
 
 #endif // alarm_client_H

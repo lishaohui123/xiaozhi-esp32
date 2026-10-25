@@ -85,6 +85,8 @@ AlarmManager::AlarmManager() :
 }
 
 AlarmManager::~AlarmManager() {
+    StopAlarmWriteTask();
+
     alarm_trigger_task_running_ = false;
     if (m_alarm_trigger_task_handle != nullptr) {
         if (alarm_trigger_task_static_allocated_) {
@@ -108,6 +110,8 @@ AlarmManager::~AlarmManager() {
 }
 
 void AlarmManager::stop() {
+    StopAlarmWriteTask();
+
     alarm_trigger_task_running_ = false;
     if (m_alarm_trigger_task_handle != nullptr) {
         if (alarm_trigger_task_static_allocated_) {
@@ -189,10 +193,42 @@ bool AlarmManager::Initialize(const std::string& api_url, const std::string& dev
     );
 
     assert(m_alarm_trigger_task_handle != nullptr);
+
+    if (alarm_write_queue_ == nullptr) {
+        alarm_write_queue_ = xQueueCreate(8, sizeof(AlarmWriteRequest*));
+    }
+
+    if (alarm_write_queue_ != nullptr && m_alarm_write_task_handle == nullptr) {
+        if (xTaskCreate(alarm_write_task,
+                        "alarm_write_task",
+                        ALARM_WRITE_TASK_STACK_SIZE,
+                        this,
+                        5,
+                        &m_alarm_write_task_handle) != pdPASS) {
+            ESP_LOGE(TAG, "Failed to create alarm write task");
+            m_alarm_write_task_handle = nullptr;
+        }
+    }
     
     initialized_ = true;
     ESP_LOGI(TAG, "AlarmManager initialized successfully");
     return true;
+}
+
+void AlarmManager::StopAlarmWriteTask() {
+    if (m_alarm_write_task_handle != nullptr) {
+        vTaskDelete(m_alarm_write_task_handle);
+        m_alarm_write_task_handle = nullptr;
+    }
+
+    if (alarm_write_queue_ != nullptr) {
+        AlarmWriteRequest* request = nullptr;
+        while (xQueueReceive(alarm_write_queue_, &request, 0) == pdTRUE) {
+            delete request;
+        }
+        vQueueDelete(alarm_write_queue_);
+        alarm_write_queue_ = nullptr;
+    }
 }
 
 bool AlarmManager::SyncWithDb() {
@@ -218,80 +254,104 @@ bool AlarmManager::SyncWithDb() {
     return true;
 }
 
-// 修改ParseAlarmsFromJson函数
+// 解析单个闹钟 JSON 对象
+bool AlarmManager::ParseAlarmObject(const cJSON* alarm_json, AlarmInfo& alarm) {
+    if (!cJSON_IsObject(alarm_json)) {
+        return false;
+    }
+
+    cJSON* id = cJSON_GetObjectItem(alarm_json, "id");
+    cJSON* time = cJSON_GetObjectItem(alarm_json, "time");
+    cJSON* message = cJSON_GetObjectItem(alarm_json, "message");
+    cJSON* weekdays = cJSON_GetObjectItem(alarm_json, "weekdays");
+    cJSON* enabled = cJSON_GetObjectItem(alarm_json, "enabled");
+    cJSON* is_one_time = cJSON_GetObjectItem(alarm_json, "isOneTime");
+    cJSON* created_at = cJSON_GetObjectItem(alarm_json, "createdAt");
+    cJSON* tip_template_id = cJSON_GetObjectItem(alarm_json, "tipTemplateId");
+
+    if (id && cJSON_IsString(id)) alarm.id = id->valuestring;
+    if (time && cJSON_IsString(time)) alarm.time = time->valuestring;
+    if (message && cJSON_IsString(message)) alarm.message = message->valuestring;
+    if (enabled && cJSON_IsNumber(enabled)) alarm.enabled = enabled->valueint != 0;
+    if (is_one_time && cJSON_IsNumber(is_one_time)) alarm.is_one_time = is_one_time->valueint != 0;
+    if (created_at && cJSON_IsString(created_at)) alarm.created_at = created_at->valuestring;
+    if (tip_template_id && cJSON_IsString(tip_template_id)) alarm.tip_template_id = std::stol(tip_template_id->valuestring);
+
+    if (weekdays && cJSON_IsString(weekdays)) {
+        alarm.weekdays_str = weekdays->valuestring;
+        ParseComplexWeekdays(alarm.weekdays_str, alarm);
+    } else {
+        alarm.weekdays_str = "";
+        alarm.alarm_type = ALARM_ONE_TIME;
+        alarm.weekdays.resize(7, false);
+    }
+
+    if (alarm.alarm_type == ALARM_DATE_SPECIFIC && alarm.is_date_specific) {
+        if (alarm.target_date.empty() || !IsAbsoluteDateString(alarm.target_date)) {
+            alarm.target_date = CalculateTargetDate(alarm);
+        }
+    }
+
+    return !alarm.id.empty() && !alarm.time.empty();
+}
+
 bool AlarmManager::ParseAlarmsFromJson(const std::string& json, std::vector<AlarmInfo>& alarms) {
     cJSON* root = cJSON_Parse(json.c_str());
     if (!root) {
         ESP_LOGE(TAG, "Failed to parse JSON: %s", json.c_str());
         return false;
     }
-    
+
     if (!cJSON_IsArray(root)) {
         ESP_LOGE(TAG, "JSON is not an array: %s", json.c_str());
         cJSON_Delete(root);
         return false;
     }
-    
+
     int array_size = cJSON_GetArraySize(root);
     ESP_LOGI(TAG, "Found %d alarms in JSON", array_size);
-    
+
     for (int i = 0; i < array_size; i++) {
-        cJSON* alarm_json = cJSON_GetArrayItem(root, i);
-        
         AlarmInfo alarm;
-        
-        // 解析基本字段
-        cJSON* id = cJSON_GetObjectItem(alarm_json, "id");
-        cJSON* time = cJSON_GetObjectItem(alarm_json, "time");
-        cJSON* message = cJSON_GetObjectItem(alarm_json, "message");
-        cJSON* weekdays = cJSON_GetObjectItem(alarm_json, "weekdays");
-        cJSON* enabled = cJSON_GetObjectItem(alarm_json, "enabled");
-        cJSON* is_one_time = cJSON_GetObjectItem(alarm_json, "isOneTime");
-        cJSON* created_at = cJSON_GetObjectItem(alarm_json, "createdAt");
-        cJSON* updated_at = cJSON_GetObjectItem(alarm_json, "updatedAt");
-        cJSON* tip_template_id = cJSON_GetObjectItem(alarm_json, "tipTemplateId");
-        
-        // 解析其他字段
-        if (id && cJSON_IsString(id)) alarm.id = id->valuestring;
-        if (time && cJSON_IsString(time)) alarm.time = time->valuestring;
-        if (message && cJSON_IsString(message)) alarm.message = message->valuestring;
-        if (enabled && cJSON_IsNumber(enabled)) alarm.enabled = enabled->valueint != 0;
-        if (is_one_time && cJSON_IsNumber(is_one_time)) alarm.is_one_time = is_one_time->valueint != 0;
-        if (created_at && cJSON_IsString(created_at)) alarm.created_at = created_at->valuestring;
-        if (tip_template_id && cJSON_IsString(tip_template_id)) alarm.tip_template_id = std::stol(tip_template_id->valuestring);
-        
-        // 解析weekdays字符串
-        if (weekdays && cJSON_IsString(weekdays)) {
-            alarm.weekdays_str = weekdays->valuestring;
-            // 解析复杂的weekdays格式
-            ParseComplexWeekdays(alarm.weekdays_str, alarm);
-        } else {
-            alarm.weekdays_str = "";
-            alarm.alarm_type = ALARM_ONE_TIME;
-            alarm.weekdays.resize(7, false);
-        }
-        
-        // ============ 新增：如果是日期特定闹钟，计算目标日期 ============
-        if (alarm.alarm_type == ALARM_DATE_SPECIFIC && alarm.is_date_specific) {
-            if (alarm.target_date.empty() || !IsAbsoluteDateString(alarm.target_date)) {
-                // 计算目标日期
-                alarm.target_date = CalculateTargetDate(alarm);
-                ESP_LOGI(TAG, "Calculated target date for alarm %s: %s", 
-                        alarm.id.c_str(), alarm.target_date.c_str());
-            }
-        }
-        
-        // 验证闹钟数据
-        if (!alarm.id.empty() && !alarm.time.empty()) {
-            ESP_LOGI(TAG, "Parsed alarm: id=%s, time=%s, type=%d, target_date=%s", 
+        if (ParseAlarmObject(cJSON_GetArrayItem(root, i), alarm)) {
+            ESP_LOGI(TAG, "Parsed alarm: id=%s, time=%s, type=%d, target_date=%s",
                     alarm.id.c_str(), alarm.time.c_str(), alarm.alarm_type, alarm.target_date.c_str());
-            alarms.push_back(alarm);
+            alarms.push_back(std::move(alarm));
         }
     }
-    
+
     cJSON_Delete(root);
     ESP_LOGI(TAG, "Successfully parsed %d alarms", alarms.size());
     return true;
+}
+
+bool AlarmManager::ParseSingleAlarmResponse(const std::string& json, AlarmInfo& alarm) {
+    cJSON* root = cJSON_Parse(json.c_str());
+    if (!root) {
+        ESP_LOGE(TAG, "Failed to parse alarm response: %s", json.c_str());
+        return false;
+    }
+
+    cJSON* target = root;
+    if (cJSON_IsArray(root)) {
+        target = cJSON_GetArrayItem(root, 0);
+    } else if (cJSON_IsObject(root)) {
+        cJSON* data = cJSON_GetObjectItem(root, "data");
+        cJSON* alarm_obj = cJSON_GetObjectItem(root, "alarm");
+        if (cJSON_IsObject(data)) {
+            target = data;
+        } else if (cJSON_IsObject(alarm_obj)) {
+            target = alarm_obj;
+        }
+    }
+
+    AlarmInfo parsed;
+    bool ok = ParseAlarmObject(target, parsed);
+    if (ok) {
+        alarm = std::move(parsed);
+    }
+    cJSON_Delete(root);
+    return ok;
 }
 
 #if 0
@@ -1539,13 +1599,25 @@ std::string AlarmManager::AddRelativeAlarm(int minutes_from_now, const std::stri
     
     // 创建一次性闹钟到数据库
     std::string response = alarm_client_.CreateAlarm(absolute_time, message, "", enabled, true);
-    
-    // 同步本地闹钟列表
+
+    // AlarmInfo new_alarm;
+    // if (ParseSingleAlarmResponse(response, new_alarm)) {
+    //     {
+    //         std::lock_guard<std::mutex> lock(alarms_mutex_);
+    //         auto it = std::find_if(alarms_.begin(), alarms_.end(), [&](const AlarmInfo& alarm) {
+    //             return alarm.id == new_alarm.id;
+    //         });
+    //         if (it == alarms_.end()) {
+    //             alarms_.push_back(std::move(new_alarm));
+    //         }
+    //     }
+    //     return "{\"success\": true, \"message\": \"Relative alarm added\"}";
+    // }
+
     if (SyncWithDb()) {
         return "{\"success\": true, \"message\": \"Relative alarm added\"}";
-    } else {
-        return "{\"success\": false, \"message\": \"Failed to sync with database\"}";
     }
+    return "{\"success\": false, \"message\": \"Failed to sync with database\"}";
 }
 
 // 修改AddAlarm函数以支持复杂类型
@@ -1606,15 +1678,57 @@ std::string AlarmManager::AddAlarm(const std::string& time, const std::string& m
     
     // 创建闹钟到数据库
     std::string response = alarm_client_.CreateAlarm(final_time, message, final_weekdays_str, enabled, is_one_time);
-    
-    // 同步本地闹钟列表
+
+    // AlarmInfo new_alarm;
+    // if (ParseSingleAlarmResponse(response, new_alarm)) {
+    //     std::string alarm_id = new_alarm.id;
+    //     {
+    //         std::lock_guard<std::mutex> lock(alarms_mutex_);
+    //         auto it = std::find_if(alarms_.begin(), alarms_.end(), [&](const AlarmInfo& alarm) {
+    //             return alarm.id == new_alarm.id;
+    //         });
+    //         if (it == alarms_.end()) {
+    //             alarms_.push_back(std::move(new_alarm));
+    //         }
+    //     }
+    //     return "{\"success\": true, \"id\": \"" + alarm_id + "\"}";
+    // }
+
     if (SyncWithDb()) {
-        // 查找刚添加的闹钟ID
-        std::string alarm_id = "new_alarm_id"; // 需要从response中解析
-        return "{\"success\": true, \"id\": \"" + alarm_id + "\"}";
-    } else {
-        return "{\"success\": false, \"message\": \"Failed to sync with database\"}";
+        return "{\"success\": true, \"id\": \"new_alarm_id\"}";
     }
+    return "{\"success\": false, \"message\": \"Failed to sync with database\"}";
+}
+
+bool AlarmManager::AddAlarmAsync(const std::string& time, const std::string& message,
+                                 const std::string& weekdays_str, bool enabled) {
+    int minutes_from_now = 0;
+    bool valid = false;
+
+    if (IsRelativeTimeFormat(time) && ParseRelativeTime(time, minutes_from_now)) {
+        valid = minutes_from_now > 0;
+    } else {
+        int hours = 0;
+        int minutes = 0;
+        valid = ParseTime(time, hours, minutes) || !ConvertChineseTimeToStandard(time).empty();
+    }
+
+    if (!valid) {
+        return false;
+    }
+
+    auto* request = new AlarmWriteRequest{time, message, weekdays_str, enabled};
+    if (alarm_write_queue_ == nullptr) {
+        delete request;
+        return false;
+    }
+
+    if (xQueueSend(alarm_write_queue_, &request, 0) != pdPASS) {
+        delete request;
+        return false;
+    }
+
+    return true;
 }
 
 // 辅助函数：创建特定类型的闹钟
@@ -2416,6 +2530,26 @@ void AlarmManager::CheckAlarms() {
             alarm_task_queue_.push_back(timeinfo);
         }
     }
+}
+
+void AlarmManager::alarm_write_task(void *arg) {
+    AlarmManager* alarm_manager = static_cast<AlarmManager*>(arg);
+    AlarmWriteRequest* request = nullptr;
+
+    while (alarm_manager->alarm_write_queue_ != nullptr) {
+        if (xQueueReceive(alarm_manager->alarm_write_queue_, &request, portMAX_DELAY) == pdTRUE &&
+            request != nullptr) {
+            std::string result = alarm_manager->AddAlarm(request->time,
+                                                          request->message,
+                                                          request->weekdays,
+                                                          request->enabled);
+            ESP_LOGI(TAG, "Async alarm add result: %s", result.c_str());
+            delete request;
+            request = nullptr;
+        }
+    }
+
+    vTaskDelete(nullptr);
 }
 
 /**************************************

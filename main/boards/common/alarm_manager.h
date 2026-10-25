@@ -20,6 +20,7 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/queue.h"
 
 
 class AlarmManager {
@@ -54,6 +55,8 @@ public:
     
     // 相对时间闹钟
     std::string AddRelativeAlarm(int minutes_from_now, const std::string& message, bool enabled = true);
+    bool AddAlarmAsync(const std::string& time, const std::string& message,
+                       const std::string& weekdays_str, bool enabled = true);
     bool ParseRelativeTime(const std::string& time_str, int& minutes);
     static bool IsRelativeTimeFormat(const std::string& time_str);
     
@@ -75,6 +78,7 @@ public:
     // 闹钟检查和触发
     void CheckAlarms();
     static void alarm_trigger_task(void *arg);
+    static void alarm_write_task(void *arg);
     
     // 节假日相关函数
     bool IsHoliday(const struct tm& timeinfo);
@@ -108,6 +112,7 @@ private:
     
     // 静态alarm_trigger_task任务分配相关成员
     static constexpr uint32_t ALARM_TRIGGER_TASK_STACK_SIZE = 1024 * 4;  // 4KB栈空间
+    static constexpr uint32_t ALARM_WRITE_TASK_STACK_SIZE = 1024 * 12;   // 12KB栈空间
     StackType_t* alarm_trigger_task_stack_;                    // 任务栈指针
     StaticTask_t* alarm_trigger_task_tcb_;                     // 任务控制块指针
     bool alarm_trigger_task_static_allocated_;                 // 标记是否已静态分配
@@ -121,6 +126,16 @@ private:
 
     std::deque<struct tm> alarm_task_queue_;
     std::atomic<bool> alarm_trigger_task_running_{false};
+
+    // 异步闹钟写入队列
+    struct AlarmWriteRequest {
+        std::string time;
+        std::string message;
+        std::string weekdays;
+        bool enabled;
+    };
+    QueueHandle_t alarm_write_queue_ = nullptr;
+    TaskHandle_t m_alarm_write_task_handle = nullptr;
     
     // 节假日缓存
     std::unordered_map<std::string, HolidayInfo> holiday_cache_;
@@ -136,6 +151,8 @@ private:
     std::string AlarmsToJson(const std::vector<AlarmInfo>& alarms);
     static std::vector<std::string> SplitString(const std::string& str, char delimiter);
     bool ParseAlarmsFromJson(const std::string& json, std::vector<AlarmInfo>& alarms);
+    bool ParseAlarmObject(const cJSON* alarm_json, AlarmInfo& alarm);
+    bool ParseSingleAlarmResponse(const std::string& json, AlarmInfo& alarm);
     static std::string CalculateAbsoluteTime(int minutes_from_now);
     
     // 相对时间解析函数
@@ -165,6 +182,7 @@ private:
     
     // TTS和播放相关
     void TriggerAlarm(const AlarmInfo& alarm);
+    void StopAlarmWriteTask();
 };
 
 #endif // ALARM_MANAGER_H

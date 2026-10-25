@@ -23,6 +23,11 @@ AlarmClient::AlarmClient() : initialized_(false) {
 }
 
 AlarmClient::~AlarmClient() {
+    std::lock_guard<std::mutex> lock(http_mutex_);
+    if (http_) {
+        http_->Close();
+        http_.reset();
+    }
 }
 
 bool AlarmClient::Initialize(const std::string& api_url, const std::string& device_id) {
@@ -46,14 +51,19 @@ std::string AlarmClient::SendRequest(const std::string& path, const std::string&
         ESP_LOGE(TAG, "DB client not initialized");
         return "{\"success\": false, \"message\": \"DB client not initialized\"}";
     }
-    
-    auto http = Board::GetInstance().GetNetwork()->CreateHttp(0);
-    if (!http) {
-        ESP_LOGE(TAG, "Failed to create HTTP client");
-        return "{\"success\": false, \"message\": \"Failed to create HTTP client\"}";
+
+    std::lock_guard<std::mutex> lock(http_mutex_);
+
+    if (!http_) {
+        http_ = Board::GetInstance().GetNetwork()->CreateHttp(0);
+        if (!http_) {
+            ESP_LOGE(TAG, "Failed to create HTTP client");
+            return "{\"success\": false, \"message\": \"Failed to create HTTP client\"}";
+        }
+        http_->SetKeepAlive(true);
     }
 
-    http->SetKeepAlive(true);  // 启用 Keep-Alive
+    auto http = http_.get();
 
     // 设置请求头
     http->SetHeader("Content-Type", "application/json");
@@ -75,6 +85,7 @@ std::string AlarmClient::SendRequest(const std::string& path, const std::string&
     // 发送请求
     if (!http->Open(method.c_str(), url.c_str())) {
         ESP_LOGE(TAG, "Failed to open connection to %s", url.c_str());
+        http->Close();
         return "{\"success\": false, \"message\": \"Failed to open connection\"}";
     }
         
@@ -94,14 +105,14 @@ std::string AlarmClient::SendRequest(const std::string& path, const std::string&
     }
 
     int status_code = http->GetStatusCode();
-        
-    http->Close();
 
     ESP_LOGI(TAG, "Response status code: %d", status_code);
         
     if (status_code >= 200 && status_code < 300) {
         return response;
     }
+
+    http->Close();
     return "{\"success\": false, \"message\": \"Max retries reached\"}";
 }
 
@@ -263,7 +274,7 @@ std::string AlarmClient::DeleteAlarms() {
 
 std::string AlarmClient::UpdateAlarmStatus(const std::string& id, bool enabled) {
     std::string path = "alarms/" + id + "/status";
-    return SendRequest(path, "POST");
+    return SendRequest(path, "GET");
 }
 
 bool AlarmClient::UpdateDeviceStatus(bool online, const std::string& firmware_version) {

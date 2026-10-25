@@ -320,6 +320,8 @@ void HttpClient::ProcessReceivedData() {
                 // GetNextLine 已经移除了 \r，所以空行就是 empty()
                 if (line.empty()) {
                     // 检查服务器是否支持 Keep-Alive
+                    // HTTP/1.1 默认保持连接，只有明确要求关闭时才断开
+                    server_keep_alive_ = true;
                     auto conn_it = response_headers_.find("connection");
                     if (conn_it != response_headers_.end()) {
                         std::string conn_value = conn_it->second.value;
@@ -351,6 +353,13 @@ void HttpClient::ProcessReceivedData() {
                                 ESP_LOGE(TAG, "Invalid Content-Length: %s", cl_it->second.value.c_str());
                                 content_length_ = 0;
                             }
+                        }
+
+                        // 没有响应体时立即结束，避免复用连接时 Read() 一直等待
+                        if (content_length_ == 0) {
+                            parse_state_ = ParseState::COMPLETE;
+                            eof_ = true;
+                            xEventGroupSetBits(event_group_handle_, EC801E_HTTP_EVENT_COMPLETE);
                         }
                     }
                     // 头部结束
