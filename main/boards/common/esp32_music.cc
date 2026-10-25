@@ -1513,6 +1513,14 @@ bool Esp32Music::Play(const std::string& music_url, int repeat) {
         return true;
     }
 
+    // 1. 干净地请求旧播报退出
+    RequestStopCurrentStreaming();
+
+    // 2. 等旧会话完全退出后，取得本次播报独占权
+    std::lock_guard<std::mutex> playback_lock(playback_mutex_);
+    playback_stop_requested_ = false;
+    is_state_completed_ = 0;
+
     /************************************
      * 关掉当前的对话，进入待命状态
      ************************************/
@@ -1525,17 +1533,15 @@ bool Esp32Music::Play(const std::string& music_url, int repeat) {
     }
     application.SetDeviceState(kDeviceStateIdle);
 
-    /******************************************
-     * 如果处于音频、闹钟播放，则结束播放
-     *******************************************/
-    StopWorksAudio();
-
     /*********************
      * 流式的语音播报
      *********************/
     for (int i = 0; i < repeat; i++) {
+        if (playback_stop_requested_ || is_state_completed_ == 2) {
+            break;
+        }
         StartStreaming(music_url);
-        if (is_state_completed_ == 2) {
+        if (playback_stop_requested_ || is_state_completed_ == 2) {
             break;
         }
         vTaskDelay(pdMS_TO_TICKS(100));
@@ -1649,6 +1655,14 @@ void Esp32Music::RaisingSimQueueLoop() {
  * 可以唤醒打断
  ***************************************/
 bool Esp32Music::PlayVoice(const std::string& music_url, int repeat) {
+    // 1. 干净地请求旧播报退出
+    RequestStopCurrentStreaming();
+
+    // 2. 等旧会话完全退出后，取得本次播报独占权
+    std::lock_guard<std::mutex> playback_lock(playback_mutex_);
+    playback_stop_requested_ = false;
+    is_state_completed_ = 0;
+
     /************************************
      * 关掉当前的对话，进入待命状态
      ************************************/
@@ -1660,17 +1674,15 @@ bool Esp32Music::PlayVoice(const std::string& music_url, int repeat) {
     }
     application.SetDeviceState(kDeviceStateIdle);
 
-    /******************************************
-     * 如果处于音频、闹钟播放，则结束播放
-     *******************************************/
-    StopWorksAudio();
-
     /*********************
      * 流式的语音播报
      *********************/
     for (int i = 0; i < repeat; i++) {
+        if (playback_stop_requested_ || is_state_completed_ == 2) {
+            break;
+        }
         StartStreaming(music_url);
-        if (is_state_completed_ == 2) {
+        if (playback_stop_requested_ || is_state_completed_ == 2) {
             break;
         }
         vTaskDelay(pdMS_TO_TICKS(100));
@@ -1710,6 +1722,24 @@ void Esp32Music::StopWorksAudio() {
         ESP_LOGI(TAG, "Stop audio level play.");
     }
     vTaskDelay(pdMS_TO_TICKS(100));
+}
+
+void Esp32Music::RequestStopCurrentStreaming() {
+    // 只“请求”当前播报干净退出：设置停止标志、关闭连接并唤醒等待中的任务。
+    // 不在这里删除任务句柄；任务由正在运行的旧会话在自己的收尾阶段删除，
+    // 避免两个线程同时 vTaskDelete 同一个任务句柄。
+    playback_stop_requested_ = true;
+    is_state_completed_ = 2;
+    prompt_playback_mode_ = false;
+    is_downloading_ = false;
+    is_playing_ = false;
+
+    CloseStreamingHttpClient();
+
+    {
+        std::lock_guard<std::mutex> lock(buffer_mutex_);
+        buffer_cv_.notify_all();
+    }
 }
 
 /*****************************************
@@ -1986,6 +2016,11 @@ bool Esp32Music::StartStreaming(const std::string& music_url) {
         // 重置mp3解码器
         CleanupMp3Decoder();
         InitializeMp3Decoder();
+    }
+
+    if (playback_stop_requested_) {
+        ESP_LOGI(TAG, "播报被新请求中断，不创建本轮流式任务");
+        return true;
     }
 
     is_downloading_ = true;
@@ -2365,6 +2400,8 @@ int32_t Esp32Music::ComputeStartIndex(const WorkInfo& workInfo, const std::vecto
 }
 
 bool Esp32Music::StopStreaming() {
+    std::lock_guard<std::mutex> lock(playback_mutex_);
+
     ESP_LOGI(TAG, "Stopping music streaming - current state: downloading=%d, playing=%d", 
             is_downloading_.load(), is_playing_.load());
 

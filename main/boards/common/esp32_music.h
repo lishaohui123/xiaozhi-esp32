@@ -142,6 +142,10 @@ private:
     bool song_name_displayed_;
     std::shared_ptr<HttpClient> streaming_http_client_;
     std::mutex streaming_http_client_mutex_;
+
+    // 播报会话串行化 + 中断请求
+    std::mutex playback_mutex_;
+    std::atomic<bool> playback_stop_requested_{false};
     
     // 歌词相关
     std::string current_lyric_url_;
@@ -275,6 +279,7 @@ private:
     std::string GetWorkByCategory(long storyCategoryId);
 
     void StopWorksAudio();
+    void RequestStopCurrentStreaming();
     void RaisingSimQueueLoop();
     void EnsureRaisingWorkerStarted();
 
