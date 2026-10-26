@@ -1033,12 +1033,20 @@ std::string AlarmManager::ConvertChineseTimeToStandard(const std::string& chines
         std::string hour_str = result.substr(0, dian_pos);
         hours = ExtractNumberFromSegment(hour_str);
         
-        // 查找"分"字
-        size_t fen_pos = result.find("分", dian_pos + 3); // 跳过"点"字（3字节）
+        // 取"点"字后面的内容，兼容"11点23"、"11点23分"、"11点半"
+        std::string minute_part = result.substr(dian_pos + 3); // 跳过"点"字（3字节）
+        size_t fen_pos = minute_part.find("分");
         if (fen_pos != std::string::npos) {
-            // 提取分前的数字（分钟）
-            std::string minute_str = result.substr(dian_pos + 3, fen_pos - (dian_pos + 3));
-            minutes = ExtractNumberFromSegment(minute_str);
+            minute_part = minute_part.substr(0, fen_pos);
+        }
+
+        minute_part.erase(std::remove(minute_part.begin(), minute_part.end(), ' '),
+                          minute_part.end());
+
+        if (minute_part.find("半") != std::string::npos) {
+            minutes = 30;
+        } else if (!minute_part.empty()) {
+            minutes = ExtractNumberFromSegment(minute_part);
         }
     } else {
         // 没有"点"字，尝试直接提取数字
