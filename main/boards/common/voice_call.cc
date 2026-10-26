@@ -1248,6 +1248,10 @@ void VoiceCall::handle_device_update(const char* payload) {
     }
     else {
         ESP_LOGI(TAG, "忽略此次升级指令");
+
+        std::string s = "小主人，升级系统只能在待命状态下执行噢，请在重试一次吧！";
+        auto& alarm_manager = AlarmManager::GetInstance();
+        alarm_manager.PlayTtsAudioStreamVoice(s, 1);
     }
 }
 

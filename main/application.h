@@ -199,7 +199,7 @@ private:
     int clock_ticks_ = 0;
     TaskHandle_t main_task_handle_ = nullptr;
     TaskHandle_t activation_task_handle_ = nullptr;
-    static constexpr uint32_t UPDATE_FIRMWARE_STACK_SIZE = 1024 * 16;
+    static constexpr uint32_t UPDATE_FIRMWARE_STACK_SIZE = 1024 * 8;
 
     // Event handlers
     void HandleStateChangedEvent();

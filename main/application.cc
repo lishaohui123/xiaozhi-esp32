@@ -22,7 +22,6 @@
 #include <map>
 #include <esp_log.h>
 #include <esp_heap_caps.h>
-#include <freertos/idf_additions.h>
 #include <cJSON.h>
 #include <driver/gpio.h>
 #include <arpa/inet.h>
@@ -130,7 +129,7 @@ Application::~Application() {
         vQueueDelete(touch_debounce_queue_);
     }
     if (update_firmware_task_handle_ != nullptr) {
-        vTaskDeleteWithCaps(update_firmware_task_handle_);
+        vTaskDelete(update_firmware_task_handle_);
         update_firmware_task_handle_ = nullptr;
     }
     vEventGroupDelete(event_group_);
@@ -660,7 +659,7 @@ void Application::UpdateFirmwareTask() {
             ESP_LOGW(TAG, "UpdateFirmwareTask task already running");
             return;
         }
-        vTaskDeleteWithCaps(update_firmware_task_handle_);
+        vTaskDelete(update_firmware_task_handle_);
         update_firmware_task_handle_ = nullptr;
     }
 
@@ -672,21 +671,22 @@ void Application::UpdateFirmwareTask() {
         }
     };
 
-    // OTA 升级会经 esp_partition_mmap 冻结 cache，任务栈必须用内部 RAM；
-    // 放 PSRAM 会在 s_task_stack_is_sane_when_cache_frozen() 处断言失败。
-    BaseType_t ret = xTaskCreateWithCaps(
+    BaseType_t ret = xTaskCreate(
         update_firmware_task,
         "update_ota",
         UPDATE_FIRMWARE_STACK_SIZE,
         this,
         2,
-        &update_firmware_task_handle_,
-        MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT
+        &update_firmware_task_handle_
     );
     if (ret != pdPASS) {
         update_firmware_task_handle_ = nullptr;
         ESP_LOGE(TAG, "Failed to allocate update firmware task stack: %u bytes", UPDATE_FIRMWARE_STACK_SIZE);
-        assert(false);
+
+        // 如果内存申请失败的话，友好的提醒
+        std::string s = std::format("小主人，不好意思啊，设备升级失败了，请重新启动小龙在试试吧");
+        auto& alarm_manager = AlarmManager::GetInstance();
+        alarm_manager.PlayTtsAudioStreamVoice(s, 1);
     }
 }
 
@@ -1560,12 +1560,12 @@ bool Application::UpgradeFirmware(const std::string& url, const std::string& ver
     audio_service_.Stop();
     vTaskDelay(pdMS_TO_TICKS(1000));
 
-    bool upgrade_success = Ota::Upgrade(upgrade_url, [display](int progress, size_t speed) {
-        std::thread([display, progress, speed]() {
-            char buffer[32];
-            snprintf(buffer, sizeof(buffer), "%d%% %uKB/s", progress, speed / 1024);
-            // display->SetChatMessage("system", buffer);
-        }).detach();
+    bool upgrade_success = Ota::Upgrade(upgrade_url, [this, display](int progress, size_t speed) {
+        char buffer[32];
+        snprintf(buffer, sizeof(buffer), "%d%% %uKB/s", progress, speed / 1024);
+        Schedule([display, message = std::string(buffer)]() {
+            //display->SetChatMessage("system", message.c_str());
+        });
     });
 
     if (!upgrade_success) {
