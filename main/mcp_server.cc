@@ -359,11 +359,8 @@ void McpServer::AddCommonTools() {
             "正确示例：“播放一首儿歌”“随便播放一首”。",
             PropertyList(),
             [music](const PropertyList& properties) -> ReturnValue {
-                if (!music->PlayRandomByCategory("儿歌")) {
-                    return "{\"success\": false, \"message\": \"获取随机儿歌失败\"}";
-                }
-                std::string work_name = music->GetWorkName();
-                return "{\"success\": true, \"message\": \"正在为您随机播放一首儿歌，正在为您唱的儿歌是: " + work_name + "\"}";
+                music->PlayRandomByCategoryAsync("儿歌");
+                return "{\"success\": true, \"message\": \"已收到，正在为您随机播放一首儿歌\"}";
             });
 
         AddTool("self.music.play_random_english_song",
@@ -372,11 +369,8 @@ void McpServer::AddCommonTools() {
             "正确示例：“播放一首英文儿歌”“随便播放一首英文的”。",
             PropertyList(),
             [music](const PropertyList& properties) -> ReturnValue {
-                if (!music->PlayRandomByCategory("英语")) {
-                    return "{\"success\": false, \"message\": \"获取随机儿歌失败\"}";
-                }
-                std::string work_name = music->GetWorkName();
-                return "{\"success\": true, \"message\": \"正在为您随机播放一首儿歌，正在为您唱的儿歌是: " + work_name + "\"}";
+                music->PlayRandomByCategoryAsync("英语");
+                return "{\"success\": true, \"message\": \"已收到，正在为您随机播放一首英文儿歌\"}";
             });
 
         AddTool("self.music.play_random_story",
@@ -385,11 +379,8 @@ void McpServer::AddCommonTools() {
             "正确示例：“播放一个故事”“随便播放一个”。",
             PropertyList(),
             [music](const PropertyList& properties) -> ReturnValue {
-                if (!music->PlayRandomByCategory("故事")) {
-                    return "{\"success\": false, \"message\": \"获取随机故事失败\"}";
-                }
-                std::string work_name = music->GetWorkName();
-                return "{\"success\": true, \"message\": \"正在为您随机讲述一个故事，正在为您讲述的故事是: " + work_name + "\"}";
+                music->PlayRandomByCategoryAsync("故事");
+                return "{\"success\": true, \"message\": \"已收到，正在为您随机播放一个故事\"}";
             });
 
         AddTool("self.music.play_song",
@@ -402,11 +393,8 @@ void McpServer::AddCommonTools() {
             }),
             [music](const PropertyList& properties) -> ReturnValue {
                 auto song_name = properties["song_name"].value<std::string>();
-                if (!music->Download(song_name, false)) {
-                    return "{\"success\": false, \"message\": \"获取音乐资源失败\"}";
-                }
-                std::string work_name = music->GetWorkName();
-                return "{\"success\": true, \"message\": \"为您找到儿歌: " + work_name + "\"}";
+                music->DownloadAsync(song_name, false);
+                return "{\"success\": true, \"message\": \"正在为您查找并播放儿歌: " + song_name + "\"}";
             });
 
         AddTool("self.music.play_chinese_classic",
@@ -419,11 +407,8 @@ void McpServer::AddCommonTools() {
             }),
             [music](const PropertyList& properties) -> ReturnValue {
                 std::string name = properties["name"].value<std::string>();
-                if (!music->Download(name, false)) {
-                    return "{\"success\": false, \"message\": \"未找到国学作品: " + name + "\"}";
-                }
-                std::string work_name = music->GetWorkName();
-                return "{\"success\": true, \"message\": \"正在播放: " + work_name + "\"}";
+                music->DownloadAsync(name, false);
+                return "{\"success\": true, \"message\": \"正在播放: " + name + "\"}";
             });
 
         AddTool("self.music.play_story",
@@ -436,11 +421,8 @@ void McpServer::AddCommonTools() {
             }),
             [music](const PropertyList& properties) -> ReturnValue {
                 auto story_name = properties["story_name"].value<std::string>();
-                if (!music->Download(story_name, false)) {
-                    return "{\"success\": false, \"message\": \"在故事库中未找到'" + story_name + "'这个故事，请确认故事名称是否正确\"}";
-                }
-                std::string work_name = music->GetWorkName();
-                return "{\"success\": true, \"message\": \"正在为您讲述故事: " + work_name + "\"}";
+                music->DownloadAsync(story_name, false);
+                return "{\"success\": true, \"message\": \"正在为您讲述故事: " + story_name + "\"}";
             });
 
         AddTool("self.music.replay_song",
@@ -453,11 +435,8 @@ void McpServer::AddCommonTools() {
             }),
             [music](const PropertyList& properties) -> ReturnValue {
                 auto song_name = properties["song_name"].value<std::string>();
-                if (!music->Download(song_name, true)) {
-                    return "{\"success\": false, \"message\": \"重新获取儿歌资源失败\"}";
-                }
-                std::string work_name = music->GetWorkName();
-                return "{\"success\": true, \"message\": \"为您找到儿歌: " + work_name + "\"}";
+                music->DownloadAsync(song_name, true);
+                return "{\"success\": true, \"message\": \"正在重新播放儿歌: " + song_name + "\"}";
             });
 
         AddTool("self.music.replay_story",
@@ -470,11 +449,8 @@ void McpServer::AddCommonTools() {
             }),
             [music](const PropertyList& properties) -> ReturnValue {
                 auto story_name = properties["story_name"].value<std::string>();
-                if (!music->Download(story_name, true)) {
-                    return "{\"success\": false, \"message\": \"重新获取故事内容失败\"}";
-                }
-                std::string work_name = music->GetWorkName();
-                return "{\"success\": true, \"message\": \"正在讲述故事: " + work_name + "\"}";
+                music->DownloadAsync(story_name, true);
+                return "{\"success\": true, \"message\": \"正在重新播放故事: " + story_name + "\"}";
             });
     }
 

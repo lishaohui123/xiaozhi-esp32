@@ -39,6 +39,8 @@ public:
     virtual std::string getStoryCategoriesWithExamples() = 0;
     virtual std::string getSongCategoriesWithExamples() = 0;
     virtual bool PlayRandomByCategory(std::string content) = 0;
+    virtual void DownloadAsync(const std::string& name, bool restart) = 0;
+    virtual void PlayRandomByCategoryAsync(const std::string& content) = 0;
     
     // 新增流式播放相关方法
     virtual void PlayAudioStream() = 0;

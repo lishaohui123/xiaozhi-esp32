@@ -105,6 +105,8 @@ public:
     virtual bool PlayHdAudio(const std::string &audio_url)override;
     virtual bool PlayTouchAudio(const std::string &touch_url)override;
     virtual bool PlayRaisingSimAudio(const std::string &raisingsim_url)override;
+    virtual void DownloadAsync(const std::string& work_name, bool restart) override;
+    virtual void PlayRandomByCategoryAsync(const std::string& content) override;
     bool IsRaisingSimActive() const { return raising_playback_active_.load(); }
     virtual bool Play2(const std::string &music_url) override;
     virtual void PrefetchFirstAudio(const std::string& work_id, const std::vector<AudioInfo>& audios, bool restart) override;
@@ -173,6 +175,8 @@ private:
     static void LyricDisplayTask(void* arg);
     static void PrefetchAudioTask(void* arg);
     static void RaisingSimQueueTask(void* arg);
+    static void DownloadAsyncTask(void* arg);
+    static void PlayRandomByCategoryAsyncTask(void* arg);
 
     // 播放作品的线程
     StackType_t* play_audios_task_stack_;

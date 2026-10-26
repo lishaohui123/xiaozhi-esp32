@@ -44,6 +44,17 @@ struct PlayAudioTaskParam {
     std::string music_url;
 };
 
+struct AsyncDownloadTaskParams {
+    Esp32Music* self;
+    std::string name;
+    bool restart;
+};
+
+struct AsyncRandomTaskParams {
+    Esp32Music* self;
+    std::string content;
+};
+
 // 创建任务参数结构
 struct PrefetchTaskParams {
     Esp32Music* self;
@@ -1170,20 +1181,20 @@ bool Esp32Music::Download(const std::string& work_name, bool restart) {
     auto http = std::unique_ptr<Http>(ota.SetupHttp());
 
     std::shared_ptr<Http> shared_http = std::move(http);
-    http_client_ = std::static_pointer_cast<HttpClient>(shared_http);
-    http_client_->SetKeepAlive(true); // 启用 Keep-Alive
+    auto client = std::static_pointer_cast<HttpClient>(shared_http);
+    client->SetKeepAlive(true); // 启用 Keep-Alive
 
-    if (!http_client_->Open("GET", url)) {
+    if (!client->Open("GET", url)) {
         ESP_LOGE(TAG, "Failed to open HTTP connection");
-        http_client_->Close();
+        client->Close();
         return false;
     }
 
     // 检查响应状态码
-    int status_code = http_client_->GetStatusCode();
+    int status_code = client->GetStatusCode();
     if (status_code != 200) {
         ESP_LOGE(TAG, "HTTP GET failed with status code: %d", status_code);
-        http_client_->Close();
+        client->Close();
         return false;
     }
 
@@ -1197,7 +1208,7 @@ bool Esp32Music::Download(const std::string& work_name, bool restart) {
 
     // 开始分块读取循环
     while (true) {
-        int bytes_read = http_client_->Read(buffer, sizeof(buffer));
+        int bytes_read = client->Read(buffer, sizeof(buffer));
         
         if (bytes_read < 0) {
             // 读取错误，但可能已经读取到部分数据
@@ -1227,7 +1238,7 @@ bool Esp32Music::Download(const std::string& work_name, bool restart) {
         }
     }
 
-    http_client_->Close();
+    client->Close();
     
     ESP_LOGI(TAG, "HTTP POST Status = %d, content_length = %d", status_code, response.length());
     ESP_LOGD(TAG, "content response: %s", response.c_str());
@@ -1303,20 +1314,6 @@ bool Esp32Music::Download(const std::string& work_id, std::vector<AudioInfo> aud
         int cur = 0;
         if (audios.size() > 1) {
             if (!restart) {
-                // 优先使用后台准备任务已经解析好的当前集，避免播报结束后再同步查一次
-                uint32_t waited_ms = 0;
-                while (!prepared_ready_.load() && waited_ms < 2000) {
-                    vTaskDelay(pdMS_TO_TICKS(20));
-                    waited_ms += 20;
-                }
-#if 0
-                if (prepared_ready_.load()) {
-                    cur = prepared_cur_.load();
-                } else {
-                    WorkInfo workInfo = GetWorkInfo(work_id);
-                    cur = ComputeStartIndex(workInfo, audios);
-                }
-#endif
                 cur = ComputeStartIndex(workInfo, audios);
             }
         }
@@ -4652,20 +4649,20 @@ bool Esp32Music::PlayRandomByCategory(std::string content) {
     auto http = std::unique_ptr<Http>(ota.SetupHttp());
 
     std::shared_ptr<Http> shared_http = std::move(http);
-    http_client_ = std::static_pointer_cast<HttpClient>(shared_http);
-    http_client_->SetKeepAlive(true); // 启用 Keep-Alive
+    auto client = std::static_pointer_cast<HttpClient>(shared_http);
+    client->SetKeepAlive(true); // 启用 Keep-Alive
 
-    if (!http_client_->Open("GET", url)) {
+    if (!client->Open("GET", url)) {
         ESP_LOGE(TAG, "Failed to open HTTP connection");
-        http_client_->Close();
+        client->Close();
         return false;
     }
 
     // 检查响应状态码
-    int status_code = http_client_->GetStatusCode();
+    int status_code = client->GetStatusCode();
     if (status_code != 200) {
         ESP_LOGE(TAG, "HTTP GET failed with status code: %d", status_code);
-        http_client_->Close();
+        client->Close();
         return false;
     }
 
@@ -4680,7 +4677,7 @@ bool Esp32Music::PlayRandomByCategory(std::string content) {
 
     // 开始分块读取循环
     while (true) {
-        int bytes_read = http_client_->Read(buffer, sizeof(buffer));
+        int bytes_read = client->Read(buffer, sizeof(buffer));
         
         if (bytes_read < 0) {
             // 读取错误，但可能已经读取到部分数据
@@ -4710,7 +4707,7 @@ bool Esp32Music::PlayRandomByCategory(std::string content) {
         }
     }
 
-    http_client_->Close();
+    client->Close();
     
     ESP_LOGI(TAG, "HTTP POST Status = %d, content_length = %d", status_code, response.length());
     ESP_LOGD(TAG, "content response: %s", response.c_str());
@@ -4775,6 +4772,48 @@ bool Esp32Music::PlayRandomByCategory(std::string content) {
     }
 
     return true;
+}
+
+void Esp32Music::DownloadAsync(const std::string& work_name, bool restart) {
+    auto* params = new AsyncDownloadTaskParams{this, work_name, restart};
+    if (xTaskCreate(DownloadAsyncTask, "music_lookup", 1024 * 8, params, 1, nullptr) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create async music lookup task");
+        delete params;
+    }
+}
+
+void Esp32Music::DownloadAsyncTask(void* arg) {
+    auto* params = static_cast<AsyncDownloadTaskParams*>(arg);
+    auto* self = params->self;
+    std::string name = std::move(params->name);
+    bool restart = params->restart;
+    delete params;
+    if (!self->Download(name, restart)) {
+        // 当解析失败时，为没有找到对应的作品，需要反馈给用户
+        // 增加语音播放，来提升用户体验
+        std::string s = "小主人，没有找到 " + name + "，我们换个故事吧！";
+        auto& alarm_manager = AlarmManager::GetInstance();
+        alarm_manager.PlayTtsAudioStreamVoice(s, 1);
+    }
+
+    vTaskDelete(nullptr);
+}
+
+void Esp32Music::PlayRandomByCategoryAsync(const std::string& content) {
+    auto* params = new AsyncRandomTaskParams{this, content};
+    if (xTaskCreate(PlayRandomByCategoryAsyncTask, "music_random", 1024 * 8, params, 1, nullptr) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create async random music task");
+        delete params;
+    }
+}
+
+void Esp32Music::PlayRandomByCategoryAsyncTask(void* arg) {
+    auto* params = static_cast<AsyncRandomTaskParams*>(arg);
+    auto* self = params->self;
+    std::string content = std::move(params->content);
+    delete params;
+    self->PlayRandomByCategory(content);
+    vTaskDelete(nullptr);
 }
 
 #if 0       // 老的代码交互太复杂了
