@@ -1548,8 +1548,7 @@ bool Application::UpgradeFirmware(const std::string& url, const std::string& ver
     }
     ESP_LOGI(TAG, "Starting firmware upgrade from URL: %s", upgrade_url.c_str());
 
-    Alert(Lang::Strings::OTA_UPGRADE, Lang::Strings::UPGRADING, "update", Lang::Sounds::OGG_UPGRADE);
-    vTaskDelay(pdMS_TO_TICKS(3000));
+    // Alert(Lang::Strings::OTA_UPGRADE, Lang::Strings::UPGRADING, "update", Lang::Sounds::OGG_UPGRADE);
 
     SetDeviceState(kDeviceStateUpgrading);
 
@@ -1573,14 +1572,24 @@ bool Application::UpgradeFirmware(const std::string& url, const std::string& ver
         ESP_LOGE(TAG, "Firmware upgrade failed, restarting audio service and continuing operation...");
         audio_service_.Start(); // Restart audio service
         board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER); // Restore power save level
-        Alert(Lang::Strings::ERROR, Lang::Strings::UPGRADE_FAILED, "circle_xmark", Lang::Sounds::OGG_EXCLAMATION);
+        // Alert(Lang::Strings::ERROR, Lang::Strings::UPGRADE_FAILED, "circle_xmark", Lang::Sounds::OGG_EXCLAMATION);
         vTaskDelay(pdMS_TO_TICKS(3000));
+
+        std::string s = "小主人，不好意思啊，设备升级失败了，请重新启动小龙在试试吧";
+        auto& alarm_manager = AlarmManager::GetInstance();
+        alarm_manager.PlayTtsAudioStreamVoice(s, 1);
+
         return false;
     } else {
         // Upgrade success, reboot immediately
         ESP_LOGI(TAG, "Firmware upgrade successful, rebooting...");
         // display->SetChatMessage("system", "Upgrade successful, rebooting...");
         vTaskDelay(pdMS_TO_TICKS(1000)); // Brief pause to show message
+
+        std::string s = "恭喜小主人，小龙升级成功，正在重启设备。";
+        auto& alarm_manager = AlarmManager::GetInstance();
+        alarm_manager.PlayTtsAudioStreamVoice(s, 1);
+
         Reboot();
         return true;
     }
