@@ -265,6 +265,8 @@ public:
     std::atomic<bool> m_udp_receive_task_running{false};
     std::atomic<bool> m_udp_send_task_running{false};
 
+    std::atomic<bool> is_call_status_{false};;
+
 private:
     // 单例实例
     static VoiceCall* s_instance;

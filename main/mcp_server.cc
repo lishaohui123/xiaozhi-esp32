@@ -835,7 +835,7 @@ void McpServer::AddCommonTools() {
             VoiceCall *voiceCall = VoiceCall::get_instance();
             voiceCall->make_call_async(member);
 
-            return "{\"success\": true, \"message\": \"\"}";
+            return "{\"success\": true, \"message\": \"好嘞小主人，正在给" + member + "打电话，请耐心等小一会噢\"}";
         });
 
 #if 0

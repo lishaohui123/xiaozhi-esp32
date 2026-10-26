@@ -591,7 +591,7 @@ void VoiceCall::stop_audio_processing() {
 void VoiceCall::make_call(std::string member) {
   
     ESP_LOGI(TAG, "开始给宝贝家长打电话");
-
+#if 0
     {
         // 让设备处于idle状态下
         auto& application = Application::GetInstance();
@@ -622,7 +622,12 @@ void VoiceCall::make_call(std::string member) {
         auto& alarm_manager = AlarmManager::GetInstance();
         alarm_manager.PlayTtsAudioStreamVoice(s, 1);
     }
-        
+#endif
+
+    // 设置通话的表情
+    is_call_status_ = true;
+    Board::GetInstance().GetDisplay()->SetEmotion("call");
+    
     {
         // 1、调用后端接口获取拨打对象(爸爸、妈妈)的微信id；
         auto& voiceCallClient = VoiceCallClient::GetInstance();
@@ -638,6 +643,10 @@ void VoiceCall::make_call(std::string member) {
             alarm_manager.PlayTtsAudioStreamVoice(s, 1);
 
             ESP_LOGE(TAG, "宝贝的家长没有绑定微信");
+
+            // 恢复的表情
+            Board::GetInstance().GetDisplay()->SetEmotion("sleep");
+            is_call_status_ = false;
             return;
         }
 
@@ -657,6 +666,10 @@ void VoiceCall::make_call(std::string member) {
             alarm_manager.PlayTtsAudioStreamVoice(s, 1);
 
             ESP_LOGE(TAG, "宝贝的家长拒绝了电话");
+
+            // 恢复的表情
+            Board::GetInstance().GetDisplay()->SetEmotion("sleep");
+            is_call_status_ = false;
             return;
         }
 
@@ -667,6 +680,10 @@ void VoiceCall::make_call(std::string member) {
             alarm_manager.PlayTtsAudioStreamVoice(s, 1);
 
             ESP_LOGE(TAG, "宝贝的家长拒绝了电话");
+
+            // 恢复的表情
+            Board::GetInstance().GetDisplay()->SetEmotion("sleep");
+            is_call_status_ = false;
             return;
         }
         
@@ -1563,6 +1580,7 @@ void VoiceCall::reset_call_state() {
 
     // 设置通话的表情
     Board::GetInstance().GetDisplay()->SetEmotion("sleep");
+    is_call_status_ = false;
 }
 
 void VoiceCall::regenerate_verification_code() {

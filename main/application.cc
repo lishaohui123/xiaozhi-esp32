@@ -1112,7 +1112,9 @@ void Application::InitializeProtocol() {
             auto emotion = cJSON_GetObjectItem(root, "emotion");
             if (cJSON_IsString(emotion)) {
                 Schedule([this, display, emotion_str = std::string(emotion->valuestring)]() {
-                    display->SetEmotion(emotion_str.c_str());
+                    if (!VoiceCall::get_instance()->is_call_status_) {
+                        display->SetEmotion(emotion_str.c_str());
+                    }
                 });
             }
         } else if (strcmp(type->valuestring, "mcp") == 0) {
@@ -1393,13 +1395,13 @@ void Application::HandleStateChangedEvent() {
 
             if (CanEnterSleepMode() == true && isInit_ == false) {
                 auto music = board.GetMusic();
-                if (music->IsWorkPlaying() == 0 && music->IsAudioPlaying() == 0) {  // 当正在播放故事时，不进行睡眠模式
+                if (music->IsWorkPlaying() == 0 && music->IsAudioPlaying() == 0 && !VoiceCall::get_instance()->is_call_status_) {  // 当正在播放故事时，不进行睡眠模式
                     board.GetDisplay()->SetEmotion("sleep");
                 }
             } else {
                 isInit_ = false;
                 auto music = board.GetMusic();
-                if (music->IsWorkPlaying() == 0 && music->IsAudioPlaying() == 0) {  // 当正在播放故事时，不进行睡眠模式
+                if (music->IsWorkPlaying() == 0 && music->IsAudioPlaying() == 0 && !VoiceCall::get_instance()->is_call_status_) {  // 当正在播放故事时，不进行睡眠模式
                     board.GetDisplay()->SetEmotion("neutral");
                 }
             }
@@ -1421,8 +1423,10 @@ void Application::HandleStateChangedEvent() {
             audio_service_.EnableWakeWordDetection(false);
             break;
         case kDeviceStateListening:
-            // display->SetStatus(Lang::Strings::LISTENING);
-            display->SetEmotion("neutral");
+            if (!VoiceCall::get_instance()->is_call_status_) {
+                // display->SetStatus(Lang::Strings::LISTENING);
+                display->SetEmotion("neutral");
+            }
 
             // Make sure the audio processor is running
             if (!audio_service_.IsAudioProcessorRunning()) {
