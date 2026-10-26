@@ -789,7 +789,11 @@ void VoiceCall::handle_mqtt_message(const char* topic, const char* payload, int 
     char device_call_request_topic[64];
     snprintf(device_call_request_topic, sizeof(device_call_request_topic), MQTT_TOPIC_DEVICE_CALL_REQUEST, m_device_info.device_id.c_str());
     if (strcmp(topic, device_call_request_topic) == 0) {
-        handle_incoming_call_async(payload);
+        if (m_call_info.state == CALL_STATE_IDLE) {
+            handle_incoming_call_async(payload);
+        } else {
+            ESP_LOGE(TAG, "当前状态不是空闲状态，不能响应通话请求");
+        }
         return;
     }
 
