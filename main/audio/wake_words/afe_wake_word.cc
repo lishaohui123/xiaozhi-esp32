@@ -89,8 +89,17 @@ bool AfeWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) {
     afe_config->aec_init = codec_->input_reference();
     afe_config->aec_mode = AEC_MODE_SR_HIGH_PERF;
     afe_config->afe_perferred_core = 1;
-    afe_config->afe_perferred_priority = 1;
+    afe_config->afe_perferred_priority = 5;
     afe_config->memory_alloc_mode = AFE_MEMORY_ALLOC_MORE_PSRAM;
+
+    // 提升唤醒灵敏度：AGC 参数与通信 AFE 保持一致
+    afe_config->agc_init = true;
+    afe_config->agc_mode = AFE_AGC_MODE_WEBRTC;
+    afe_config->agc_compression_gain_db = 15;
+    afe_config->agc_target_level_dbfs = -9;
+
+    // DET_MODE_95 比默认的 DET_MODE_90 更容易触发唤醒词
+    afe_config->wakenet_mode = DET_MODE_95;
     
     afe_iface_ = esp_afe_handle_from_config(afe_config);
     afe_data_ = afe_iface_->create_from_config(afe_config);
