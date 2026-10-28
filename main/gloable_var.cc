@@ -211,9 +211,13 @@ int GloableVar::update_gloable_var(int volume) {
 
     if (!http_client_->Open("GET", url)) {
         ESP_LOGE(TAG, "Failed to open HTTP connection");
+        http_client_->Close();
+        http_client_.reset();
         return ESP_FAIL;
     }
 
+    http_client_->Close();
+    http_client_.reset();
     ESP_LOGI(TAG, "update gloable var successful");
     return ESP_OK;
 }
@@ -237,19 +241,26 @@ int GloableVar::get_gloable_var() {
 
     if (!http_client_->Open("GET", url)) {
         ESP_LOGE(TAG, "Failed to open HTTP connection");
+        http_client_->Close();
+        http_client_.reset();
         return ESP_FAIL;
     }
 
     auto status_code = http_client_->GetStatusCode();
     if (status_code == 202) {
+        http_client_->Close();
+        http_client_.reset();
         return ESP_ERR_TIMEOUT;
     }
     if (status_code != 200) {
+        http_client_->Close();
+        http_client_.reset();
         return ESP_FAIL;
     }
 
     std::string data = http_client_->ReadAll();
     http_client_->Close();
+    http_client_.reset();
     ESP_LOGD(TAG, "response=%s", data.c_str());
 
     cJSON *root = cJSON_Parse(data.c_str());
@@ -331,19 +342,26 @@ int GloableVar::get_alarm_var() {
     
     if (!http_client_->Open("GET", url)) {
         ESP_LOGE(TAG, "Failed to open HTTP connection");
+        http_client_->Close();
+        http_client_.reset();
         return ESP_FAIL;
     }
 
     auto status_code = http_client_->GetStatusCode();
     if (status_code == 202) {
+        http_client_->Close();
+        http_client_.reset();
         return ESP_ERR_TIMEOUT;
     }
     if (status_code != 200) {
+        http_client_->Close();
+        http_client_.reset();
         return ESP_FAIL;
     }
 
     std::string data = http_client_->ReadAll();
     http_client_->Close();
+    http_client_.reset();
     ESP_LOGD(TAG, "response=%s", data.c_str());
 
     cJSON *root = cJSON_Parse(data.c_str());
