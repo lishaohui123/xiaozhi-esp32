@@ -1116,8 +1116,15 @@ void Esp32Music::PlayAudiosImpl(const std::string& work_id, std::vector<AudioInf
 
     for (int32_t i = cur; i < audio_infos.size();  i++) {
         if (!audio_infos.at(i).play_url.empty()) {
-            // 不再在每集播放前同步上报“开始播放”，避免额外的 HTTPS 握手拖慢起播。
-            // 续播进度仍由播放完成后的 UpdateWorkInfo(completed=1) 维护。
+            if (audio_infos.size() > 1) {
+                // 更新讲到当前集
+                WorkInfo workInfo;
+                workInfo.deviceId = GloableVar::device_id;
+                workInfo.workId = work_id;
+                workInfo.audioId = audio_infos.at(i).id;
+                workInfo.completed = 0;
+                InsertWorkInfo(workInfo);
+            }
 
             // 其他中断线程修改了状态位
             if (is_play_audios_status_ == 0) {
