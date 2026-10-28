@@ -40,6 +40,8 @@ struct works {
     std::string name;
 };
 
+struct PlayAudiosTaskParams;
+
 // 音频块内存池结构
 struct AudioChunkPoolItem {
     uint8_t* data;            // 数据指针
@@ -182,6 +184,7 @@ private:
     StackType_t* play_audios_task_stack_;
     StaticTask_t* play_audios_task_tcb_;
     bool play_audios_task_static_allocated_;
+    PlayAudiosTaskParams* pending_play_audios_params_ = nullptr;
 
     // 播放音频的线程
     StackType_t* play_audio_task_stack_;

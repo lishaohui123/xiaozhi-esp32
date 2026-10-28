@@ -1321,9 +1321,14 @@ bool Esp32Music::Download(const std::string& work_id, std::vector<AudioInfo> aud
         ESP_LOGI(TAG, "作品第几集 %d", cur);
 
         // 把讲故事交给一个线程
+        if (pending_play_audios_params_ != nullptr) {
+            delete pending_play_audios_params_;
+            pending_play_audios_params_ = nullptr;
+        }
         PlayAudiosTaskParams* params = new PlayAudiosTaskParams{
             this, work_id, audios, cur
         };
+        pending_play_audios_params_ = params;
 
         /******************************************
          * 如果处于音频播放，则结束播放
@@ -2118,6 +2123,7 @@ void Esp32Music::PlayAudiosTask(void* arg) {
     auto* params = static_cast<PlayAudiosTaskParams*>(arg);
     if (params) {
         auto* self = params->self;
+        self->pending_play_audios_params_ = nullptr;
         std::string work_id = params->work_id;
         std::vector<AudioInfo> audio_infos = std::move(params->audio_infos);
         int32_t cur = params->cur;
