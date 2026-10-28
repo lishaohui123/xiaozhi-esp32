@@ -2306,12 +2306,27 @@ int32_t Esp32Music::ComputeStartIndex(const WorkInfo& workInfo, const std::vecto
     if (!audio_id.empty()) {
         for (int32_t i = 0; i < (int32_t)audio_infos.size(); i++) {
             if (audio_id == audio_infos.at(i).id) {
+                // 当前播放到最后一集，并且播放完成，从头开始播放
                 if ((i == (int32_t)audio_infos.size() - 1) && (completed == 1)) {
                     cur = 0;
                     break;
                 }
-                cur = i;
-                break;
+
+                // 当前播放到最后一集，但是没有播放完成，继续播放最后一集
+                if ((i == (int32_t)audio_infos.size() - 1) && (completed == 0)) {
+                    cur = i;
+                    break;
+                }
+
+                // 非最后一集的处理，没有完成的话，继续播放当前集
+                // 当前集完成的话，继续播放下一集
+                if (completed == 0) {
+                    cur = i;
+                    break;
+                } else {
+                    cur = i + 1;
+                    break;
+                }
             }
         }
     }
