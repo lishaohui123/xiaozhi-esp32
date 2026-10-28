@@ -944,6 +944,8 @@ void AudioService::ResetDecoder() {
     audio_decode_queue_.clear();
     audio_playback_queue_.clear();
     audio_testing_queue_.clear();
+    audio_encode_queue_.clear();
+    audio_send_queue_.clear();
     audio_queue_cv_.notify_all();
 }
 
