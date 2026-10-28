@@ -103,6 +103,26 @@ static bool IsValidDateString(const std::string& date_str) {
     return true;
 }
 
+// 将绝对时间转换为 HH:MM；相对时间会返回 false
+static bool NormalizeAlarmTime(const std::string& input, std::string& normalized) {
+    int hours = 0;
+    int minutes = 0;
+    auto& alarm_manager = AlarmManager::GetInstance();
+
+    if (alarm_manager.ParseTime(input, hours, minutes)) {
+        normalized = input;
+        return true;
+    }
+
+    std::string converted = alarm_manager.ConvertChineseTimeToStandard(input);
+    if (!converted.empty()) {
+        normalized = converted;
+        return true;
+    }
+
+    return false;
+}
+
 McpServer::McpServer() {
 }
 
@@ -455,158 +475,138 @@ void McpServer::AddCommonTools() {
     }
 
     /*******************
-     * 智慧闹钟系列
+    * 智慧闹钟系列
+    * self.alarm.set_absolute：一次性绝对时间
+    * self.alarm.set_relative：相对时间
+    * self.alarm.set_workday：周一至周五
+    * self.alarm.set_weekend：周六、周日
+    * self.alarm.set_holiday：节假日
+    * self.alarm.set_daily：每天
      ********************/
-    // 综合性的闹钟，支持各种类型
-    AddTool("self.alarm.set",
-        "设置闹钟。支持多种闹钟类型：\n"
-        "1. 一次性闹钟：不指定weekdays参数或设置为空字符串\n"
-        "2. 每日闹钟：weekdays设置为'daily'\n"
-        "3. 工作日闹钟（周一至周五）：weekdays设置为'workday'\n"
-        "4. 工作日闹钟（排除节假日）：weekdays设置为'workday:exclude_holiday'\n"
-        "5. 特定年份工作日闹钟：weekdays设置为'workday:2024:exclude_holiday'（2024可替换为其他年份）\n"
-        "6. 周末闹钟：weekdays设置为'weekend'\n"
-        "7. 假期闹钟：weekdays设置为'holiday'\n"
-        "8. 自定义星期闹钟：weekdays设置为'1,3,5'（周一、周三、周五，数字1-7表示周一到周日）\n"
-        "9. 二进制模式闹钟：weekdays设置为'1100011'（7位二进制，0=不重复，1=重复，从周日开始）\n"
-        "10. 每日闹钟（兼容旧格式）：weekdays设置为'0,1,2,3,4,5,6'\n"
-        "11. 工作日闹钟（兼容旧格式）：weekdays设置为'1,2,3,4,5'\n"
-        "12. 周末闹钟（兼容旧格式）：weekdays设置为'0,6'\n"
-        "13. 日期特定闹钟：weekdays设置为'date:tomorrow'（明天）、'date:+2'（后天）、'date:+3'（大后天）、'date:YYYY-MM-DD'（具体日期）\n"
-        "\n"
-        "支持自然语言时间格式：\n"
-        "- 绝对时间：'08:00'、'八点'、'上午八点'、'晚上八点'\n"
-        "- 相对时间：'五分钟后'、'半小时后'、'两小时后'\n"
-        "- 日期+时间：'明天八点'、'后天早上七点'、'2026-01-15 08:00'\n"
-        "\n"
-        "示例：\n"
-        "- 设置一次性闹钟：self.alarm.set(time=\"08:00\", message=\"起床\")\n"
-        "- 设置明天闹钟：self.alarm.set(time=\"明天八点\", message=\"起床\")\n"
-        "- 设置每日闹钟：self.alarm.set(time=\"07:00\", message=\"早安\", weekdays=\"daily\")\n"
-        "- 设置工作日闹钟（排除节假日）：self.alarm.set(time=\"08:30\", message=\"上班\", weekdays=\"workday:exclude_holiday\")\n"
-        "- 设置周末闹钟：self.alarm.set(time=\"09:30\", message=\"周末放松\", weekdays=\"weekend\")\n"
-        "- 设置自定义星期闹钟：self.alarm.set(time=\"18:00\", message=\"健身\", weekdays=\"1,3,5\")\n"
-        "- 设置假期闹钟：self.alarm.set(time=\"10:00\", message=\"休息\", weekdays=\"holiday\")",
+    // 一次性绝对时间闹钟
+    AddTool("self.alarm.set_absolute",
+        "设置一次性绝对时间闹钟。只接受绝对时间或“日期+时间”，不接受“5分钟后”这类相对时间。\n"
+        "参数:\n"
+        "- time: 支持 '08:00'、'八点'、'上午八点'、'晚上八点'、'明天八点'、'后天早上七点'、'2026-01-15 08:00'\n"
+        "- message: 闹钟提醒内容\n"
+        "- enabled: 是否启用闹钟，默认为true",
         PropertyList({
             Property("time", kPropertyTypeString),
             Property("message", kPropertyTypeString),
-            Property("weekdays", kPropertyTypeString, ""),
             Property("enabled", kPropertyTypeBoolean, true)
         }),
         [](const PropertyList& properties) -> ReturnValue {
             std::string time_input = properties["time"].value<std::string>();
             std::string message = properties["message"].value<std::string>();
-            std::string weekdays = properties["weekdays"].value<std::string>();
             bool enabled = properties["enabled"].value<bool>();
-            
+
             auto& alarm_manager = AlarmManager::GetInstance();
-            
-            // ============ 解析自然语言时间 ============
             std::string parsed_time = time_input;
-            std::string parsed_weekdays = weekdays;
-            
-            // 如果weekdays为空，尝试从time_input中提取日期信息
-            if (parsed_weekdays.empty()) {
-                // 检查是否包含中文日期关键词
-                bool has_date_keyword = false;
-                
-                // 首先检查中文日期关键词
-                std::string lower_time = time_input;
-                std::transform(lower_time.begin(), lower_time.end(), lower_time.begin(), ::tolower);
-                
-                if (lower_time.find("明天") != std::string::npos || 
-                    lower_time.find("明日") != std::string::npos) {
-                    parsed_weekdays = "date:tomorrow";
-                    has_date_keyword = true;
-                } else if (lower_time.find("后天") != std::string::npos) {
-                    parsed_weekdays = "date:+2";
-                    has_date_keyword = true;
-                } else if (lower_time.find("大后天") != std::string::npos) {
-                    parsed_weekdays = "date:+3";
-                    has_date_keyword = true;
-                } else if (lower_time.find("今天") != std::string::npos || 
-                        lower_time.find("今日") != std::string::npos) {
-                    // 今天，不需要设置weekdays，保持为空即可
-                    has_date_keyword = true;
+            std::string parsed_weekdays;
+
+            std::string lower_time = time_input;
+            std::transform(lower_time.begin(), lower_time.end(), lower_time.begin(), ::tolower);
+            bool has_date_keyword = false;
+
+            if (lower_time.find("明天") != std::string::npos ||
+                lower_time.find("明日") != std::string::npos) {
+                parsed_weekdays = "date:tomorrow";
+                has_date_keyword = true;
+            } else if (lower_time.find("后天") != std::string::npos) {
+                parsed_weekdays = "date:+2";
+                has_date_keyword = true;
+            } else if (lower_time.find("大后天") != std::string::npos) {
+                parsed_weekdays = "date:+3";
+                has_date_keyword = true;
+            } else if (lower_time.find("今天") != std::string::npos ||
+                       lower_time.find("今日") != std::string::npos) {
+                has_date_keyword = true;
+            }
+
+            if (has_date_keyword) {
+                parsed_time = ExtractTimeFromString(time_input);
+            } else if (time_input.length() >= 16 &&
+                       time_input[4] == '-' && time_input[7] == '-') {
+                size_t space_pos = time_input.find(' ');
+                if (space_pos != std::string::npos && space_pos == 10) {
+                    std::string date_part = time_input.substr(0, 10);
+                    std::string time_part = time_input.substr(11);
+                    if (IsValidDateString(date_part) && IsValidTimeString(time_part)) {
+                        parsed_weekdays = "date:" + date_part;
+                        parsed_time = time_part;
+                    }
                 }
-                
-                // 如果有日期关键词，提取时间部分
-                if (has_date_keyword) {
-                    parsed_time = ExtractTimeFromString(time_input);
-                } 
-                // 检查是否是标准日期时间格式，如"2026-01-15 08:00"
-                else if (time_input.length() >= 16 && time_input[4] == '-' && time_input[7] == '-') {
-                    // 格式：YYYY-MM-DD HH:MM
-                    size_t space_pos = time_input.find(' ');
-                    if (space_pos != std::string::npos && space_pos == 10) {
-                        std::string date_part = time_input.substr(0, 10);
-                        std::string time_part = time_input.substr(11);
-                        
-                        // 验证日期和时间格式
-                        if (IsValidDateString(date_part) && IsValidTimeString(time_part)) {
-                            parsed_weekdays = "date:" + date_part;
+            } else if (!time_input.empty() && time_input[0] == '+') {
+                size_t space_pos = time_input.find(' ');
+                if (space_pos != std::string::npos) {
+                    std::string days_part = time_input.substr(0, space_pos);
+                    std::string time_part = time_input.substr(space_pos + 1);
+                    try {
+                        int days = std::stoi(days_part.substr(1));
+                        if (days > 0 && IsValidTimeString(time_part)) {
+                            parsed_weekdays = "date:+" + std::to_string(days);
                             parsed_time = time_part;
                         }
-                    }
-                }
-                // 检查是否是相对天数格式，如"+1 08:00"
-                else if (time_input[0] == '+') {
-                    size_t space_pos = time_input.find(' ');
-                    if (space_pos != std::string::npos) {
-                        std::string days_part = time_input.substr(0, space_pos);
-                        std::string time_part = time_input.substr(space_pos + 1);
-                        
-                        try {
-                            int days = std::stoi(days_part.substr(1)); // 跳过'+'号
-                            if (days > 0 && IsValidTimeString(time_part)) {
-                                parsed_weekdays = "date:+" + std::to_string(days);
-                                parsed_time = time_part;
-                            }
-                        } catch (const std::exception& e) {
-                            // 转换失败，保持原样
-                        }
+                    } catch (const std::exception&) {
                     }
                 }
             }
-        
-        // ============ 转换时间为标准格式 ============
-        // 首先尝试直接解析为标准时间格式
-        int hours, minutes;
-        if (!alarm_manager.ParseTime(parsed_time, hours, minutes)) {
-            // 尝试中文时间转换
-            std::string converted_time = alarm_manager.ConvertChineseTimeToStandard(parsed_time);
-            if (!converted_time.empty()) {
-                parsed_time = converted_time;
-            } else {
-                // 检查是否是相对时间
-                int minutes_from_now = 0;
-                if (alarm_manager.IsRelativeTimeFormat(parsed_time) && 
-                    alarm_manager.ParseRelativeTime(parsed_time, minutes_from_now)) {
-                    // 相对时间将由AddAlarm内部处理
-                    // 保持parsed_time为原始字符串
-                } else {
-                    // 无法识别的格式
-                    return "{\"success\": false, \"message\": \"时间格式不正确，请使用HH:MM格式或中文时间表达\"}";
-                }
-            }
-        }
-        
-        // 异步提交，主线程立即返回，实际数据库写入由 AlarmManager 后台任务完成
-        if (!alarm_manager.AddAlarmAsync(parsed_time, message, parsed_weekdays, true)) {
-            return "{\"success\": false, \"message\": \"时间格式不正确，请使用HH:MM格式或中文时间表达\"}";
-        }
-        
-        // 构建响应信息
-        std::string response = "{\"success\": true, \"message\": \"闹钟设置成功\", \"details\": {";
-        response += "\"time\": \"" + parsed_time + "\", ";
-        response += "\"message\": \"" + message + "\", ";
-        response += "\"weekdays\": \"" + parsed_weekdays + "\"";
-        response += "}}";
-        
-        return response;
-    });
 
-    // 添加工作日闹钟函数
+            if (alarm_manager.IsRelativeTimeFormat(parsed_time)) {
+                return "{\"success\": false, \"message\": \"set_absolute 只接受绝对时间，相对时间请使用 self.alarm.set_relative\"}";
+            }
+
+            if (!NormalizeAlarmTime(parsed_time, parsed_time)) {
+                return "{\"success\": false, \"message\": \"时间格式不正确\"}";
+            }
+
+            if (!alarm_manager.AddAlarmAsync(parsed_time, message, parsed_weekdays, enabled)) {
+                return "{\"success\": false, \"message\": \"时间格式不正确\"}";
+            }
+
+            std::string response =
+                "{\"success\": true, \"message\": \"闹钟设置成功\", \"details\": {"
+                "\"time\": \"" + parsed_time + "\", "
+                "\"message\": \"" + message + "\", "
+                "\"weekdays\": \"" + parsed_weekdays + "\""
+                "}}";
+            return response;
+        });
+
+     // 一次性相对时间闹钟
+    AddTool("self.alarm.set_relative",
+            "设置相对时间闹钟（如：30分钟后提醒）。只接受相对时间，例如“5分钟后"
+            "”、“2小时后”。\n"
+            "如果用户说的是绝对时间，例如“11点23”、“11点半”、“晚上10点15”，请改"
+            "用 self.alarm.set_absolute。\n"
+            "参数:\n"
+            "- relative_time: 相对时间字符串，支持格式：\n"
+            "  * '30分钟后' - 30分钟后提醒\n"
+            "  * '2小时后' - 2小时后提醒\n"
+            "  * '1小时30分钟后' - 1小时30分钟后提醒\n"
+            "  * '45分钟' - 45分钟后提醒\n"
+            "- message: 闹钟提醒内容\n"
+            "- enabled: 是否启用闹钟，默认为true",
+            PropertyList({Property("relative_time", kPropertyTypeString),
+                          Property("message", kPropertyTypeString),
+                          Property("enabled", kPropertyTypeBoolean, true)}),
+            [](const PropertyList &properties) -> ReturnValue {
+              std::string relative_time =
+                  properties["relative_time"].value<std::string>();
+              std::string message = properties["message"].value<std::string>();
+              bool enabled = properties["enabled"].value<bool>();
+
+              auto &alarm_manager = AlarmManager::GetInstance();
+
+              if (!alarm_manager.AddAlarmAsync(relative_time, message, "",
+                                               enabled)) {
+                return "{\"success\": false, \"message\": \"时间格式不正确\"}";
+              }
+
+              return "{\"success\": true, \"message\": \"闹钟增加成功\"}";
+            });
+    
+    // 周期闹钟，添加工作日闹钟函数
     AddTool("self.alarm.set_workday",
         "设置工作日闹钟（周一至周五）。\n"
         "参数说明：\n"
@@ -646,14 +646,19 @@ void McpServer::AddCommonTools() {
                 }
             }
             
-            if (!alarm_manager.AddAlarmAsync(time, message, weekdays, true)) {
+            std::string normalized_time;
+            if (!NormalizeAlarmTime(time, normalized_time)) {
+                return "{\"success\": false, \"message\": \"时间格式不正确\"}";
+            }
+
+            if (!alarm_manager.AddAlarmAsync(normalized_time, message, weekdays, enabled)) {
                 return "{\"success\": false, \"message\": \"时间格式不正确\"}";
             }
 
             return "{\"success\": true, \"message\": \"闹钟增加成功\"}";
         });
 
-    // 添加假期闹钟函数
+    // 周期闹钟，添加假期闹钟函数
     AddTool("self.alarm.set_holiday",
         "设置假期闹钟（仅在节假日触发）。\n"
         "参数说明：\n"
@@ -674,14 +679,20 @@ void McpServer::AddCommonTools() {
             bool enabled = properties["enabled"].value<bool>();
             
             auto& alarm_manager = AlarmManager::GetInstance();
-            if (!alarm_manager.AddAlarmAsync(time, message, "holiday", true)) {
+
+            std::string normalized_time;
+            if (!NormalizeAlarmTime(time, normalized_time)) {
+                return "{\"success\": false, \"message\": \"时间格式不正确\"}";
+            }
+
+            if (!alarm_manager.AddAlarmAsync(normalized_time, message, "holiday", enabled)) {
                 return "{\"success\": false, \"message\": \"时间格式不正确\"}";
             }
 
             return "{\"success\": true, \"message\": \"闹钟增加成功\"}";
         });
 
-    // 添加周末闹钟函数
+    // 周期闹钟，添加周末闹钟函数
     AddTool("self.alarm.set_weekend",
         "设置周末闹钟（周六、周日）。\n"
         "参数说明：\n"
@@ -702,7 +713,13 @@ void McpServer::AddCommonTools() {
             bool enabled = properties["enabled"].value<bool>();
             
             auto& alarm_manager = AlarmManager::GetInstance();
-            if (!alarm_manager.AddAlarmAsync(time, message, "weekend", true)) {
+
+            std::string normalized_time;
+            if (!NormalizeAlarmTime(time, normalized_time)) {
+                return "{\"success\": false, \"message\": \"时间格式不正确\"}";
+            }
+
+            if (!alarm_manager.AddAlarmAsync(normalized_time, message, "weekend", enabled)) {
                 return "{\"success\": false, \"message\": \"时间格式不正确\"}";
             }
 
@@ -710,7 +727,7 @@ void McpServer::AddCommonTools() {
         });
 
 
-    // 添加每日闹钟函数
+    // 周期闹钟，添加每日闹钟函数
     AddTool("self.alarm.set_daily",
         "设置每日闹钟（每天触发）。\n"
         "参数说明：\n"
@@ -731,43 +748,19 @@ void McpServer::AddCommonTools() {
             bool enabled = properties["enabled"].value<bool>();
             
             auto& alarm_manager = AlarmManager::GetInstance();
-            if (!alarm_manager.AddAlarmAsync(time, message, "daily", true)) {
+
+            std::string normalized_time;
+            if (!NormalizeAlarmTime(time, normalized_time)) {
+                return "{\"success\": false, \"message\": \"时间格式不正确\"}";
+            }
+
+            if (!alarm_manager.AddAlarmAsync(normalized_time, message, "daily", enabled)) {
                 return "{\"success\": false, \"message\": \"时间格式不正确\"}";
             }
 
             return "{\"success\": true, \"message\": \"闹钟增加成功\"}";
         });
 
-    // 相对时间闹钟
-    AddTool("self.alarm.set_relative",
-        "设置相对时间闹钟（如：30分钟后提醒）。只接受相对时间，例如“5分钟后”、“2小时后”。\n"
-        "如果用户说的是绝对时间，例如“11点23”、“11点半”，请改用 self.alarm.set。\n"
-        "参数:\n"
-        "- relative_time: 相对时间字符串，支持格式：\n"
-        "  * '30分钟后' - 30分钟后提醒\n"
-        "  * '2小时后' - 2小时后提醒\n"
-        "  * '1小时30分钟后' - 1小时30分钟后提醒\n"
-        "  * '45分钟' - 45分钟后提醒\n"
-        "- message: 闹钟提醒内容\n"
-        "- enabled: 是否启用闹钟，默认为true",
-        PropertyList({
-            Property("relative_time", kPropertyTypeString),
-            Property("message", kPropertyTypeString),
-            Property("enabled", kPropertyTypeBoolean, true)
-        }),
-        [](const PropertyList& properties) -> ReturnValue {
-            std::string relative_time = properties["relative_time"].value<std::string>();
-            std::string message = properties["message"].value<std::string>();
-            bool enabled = properties["enabled"].value<bool>();
-            
-            auto& alarm_manager = AlarmManager::GetInstance();
-            
-            if (!alarm_manager.AddAlarmAsync(relative_time, message, "", true)) {
-                return "{\"success\": false, \"message\": \"时间格式不正确\"}";
-            }
-
-            return "{\"success\": true, \"message\": \"闹钟增加成功\"}";
-        });
 
     // 根据时间删除闹钟
     AddTool("self.alarm.delete_by_time",
