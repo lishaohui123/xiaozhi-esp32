@@ -407,6 +407,10 @@ VoiceCallClient::CallRequest VoiceCallClient::getCallRequest(const std::string &
     ESP_LOGI(TAG, "call request: response=%s", response.c_str());
 
     cJSON *response_json = cJSON_Parse(response.c_str());
+    if (response_json == nullptr) {
+        ESP_LOGE(TAG, "Failed to parse call request response");
+        return result;
+    }
 
     cJSON* roomSn_item = cJSON_GetObjectItem(response_json, "roomSn");
     if (roomSn_item && cJSON_IsString(roomSn_item)) {
@@ -432,6 +436,7 @@ VoiceCallClient::CallRequest VoiceCallClient::getCallRequest(const std::string &
     if (roomToken_item && cJSON_IsString(roomToken_item)) {
         result.roomToken = std::string(roomToken_item->valuestring);
     }
+    cJSON_Delete(response_json);
     return result;
 }
 
@@ -443,6 +448,10 @@ bool VoiceCallClient::getCallStatus(const std::string &device_id, const std::str
     std::string response = SendRequest(path, "GET");
 
     cJSON *response_json = cJSON_Parse(response.c_str());
+    if (response_json == nullptr) {
+        ESP_LOGE(TAG, "Failed to parse call status response");
+        return false;
+    }
 
     std::string status = "0";
     cJSON* status_item = cJSON_GetObjectItem(response_json, "status");
@@ -450,6 +459,7 @@ bool VoiceCallClient::getCallStatus(const std::string &device_id, const std::str
         status = std::string(status_item->valuestring);
     }
 
+    cJSON_Delete(response_json);
     return (status == "1") ? true : false;
 }
 
