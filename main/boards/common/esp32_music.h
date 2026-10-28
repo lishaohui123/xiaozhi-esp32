@@ -41,6 +41,9 @@ struct works {
 };
 
 struct PlayAudiosTaskParams;
+struct DownloadTaskParams;
+struct PlayAudioTaskParam;
+struct PrefetchTaskParams;
 
 // 音频块内存池结构
 struct AudioChunkPoolItem {
@@ -190,6 +193,7 @@ private:
     StackType_t* play_audio_task_stack_;
     StaticTask_t* play_audio_task_tcb_;
     bool play_audio_task_static_allocated_;
+    PlayAudioTaskParam* pending_play_audio_param_ = nullptr;
 
     volatile std::atomic<bool> is_downloaded;
     volatile std::atomic<bool> is_played;
@@ -205,12 +209,14 @@ private:
     StackType_t* download_task_stack_ = nullptr;                    // 任务栈指针
     StaticTask_t* download_task_tcb_ = nullptr;                     // 任务控制块指针
     bool download_task_static_allocated_ = false;                   // 标记是否已静态分配
+    DownloadTaskParams* pending_download_params_ = nullptr;
 
     // 静态prefetch_task任务分配相关成员
     static constexpr uint32_t PREFETCH_TASK_STACK_SIZE = 1024 * 8;  // 8KB栈空间
     StackType_t* prefetch_task_stack_ = nullptr;                    // 任务栈指针
     StaticTask_t* prefetch_task_tcb_ = nullptr;                     // 任务控制块指针
     bool prefetch_task_static_allocated_ = false;                   // 标记是否已静态分配
+    PrefetchTaskParams* pending_prefetch_params_ = nullptr;
 
     // Latest-wins bounded queue (capacity 1) and consumer task for feeding voice
     std::mutex raising_queue_mutex_;

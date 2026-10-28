@@ -1645,9 +1645,14 @@ void Esp32Music::StopBroadcast() {
 bool Esp32Music::Play2(const std::string& music_url) {
 
     // 把讲故事交给一个线程
+    if (pending_play_audio_param_ != nullptr) {
+        delete pending_play_audio_param_;
+        pending_play_audio_param_ = nullptr;
+    }
     PlayAudioTaskParam* param = new PlayAudioTaskParam{
         this, music_url
     };
+    pending_play_audio_param_ = param;
 
     /******************************************
      * 如果处于音频、闹钟播放，则结束播放
@@ -1706,8 +1711,11 @@ void Esp32Music::PlayAudioTask(void* arg) {
 
     auto* param = static_cast<PlayAudioTaskParam*>(arg);
     if (param) {
-        param->self->PlayAudioImpl(param->music_url);
+        std::string music_url = std::move(param->music_url);
+        auto* self = param->self;
+        self->pending_play_audio_param_ = nullptr;
         delete param;
+        self->PlayAudioImpl(music_url);
     }
 
     ESP_LOGI(TAG, "PlayAudioTask finished");
@@ -1938,7 +1946,12 @@ bool Esp32Music::StartStreaming(const std::string& music_url) {
         assert(download_task_tcb_ != nullptr);
     }
 #endif
+    if (pending_download_params_ != nullptr) {
+        delete pending_download_params_;
+        pending_download_params_ = nullptr;
+    }
     DownloadTaskParams* download_params = new DownloadTaskParams{this, music_url, download_offset};
+    pending_download_params_ = download_params;
 #if 0
     xTaskCreatePinnedToCore(DownloadAudioStreamTask, "audio_download", 1024 * 12, download_params, 1, &download_task_handle_, 1);
 #endif
@@ -2063,6 +2076,7 @@ void Esp32Music::DownloadAudioStreamTask(void* arg) {
     
     auto* params = static_cast<DownloadTaskParams*>(arg);
     auto* self = params->self;
+    self->pending_download_params_ = nullptr;
     std::string music_url = std::move(params->music_url);
     size_t initial_offset = params->initial_offset;
     delete params;
@@ -2179,7 +2193,12 @@ void Esp32Music::PrefetchFirstAudio(const std::string& work_id, const std::vecto
         assert(prefetch_task_tcb_ != nullptr);
     }
 
+    if (pending_prefetch_params_ != nullptr) {
+        delete pending_prefetch_params_;
+        pending_prefetch_params_ = nullptr;
+    }
     PrefetchTaskParams* params = new PrefetchTaskParams{this, work_id, audios, restart};
+    pending_prefetch_params_ = params;
 
     prefetch_task_handle_ = xTaskCreateStatic(
         PrefetchAudioTask,
@@ -2197,6 +2216,7 @@ void Esp32Music::PrefetchFirstAudio(const std::string& work_id, const std::vecto
 void Esp32Music::PrefetchAudioTask(void* arg) {
     auto* params = static_cast<PrefetchTaskParams*>(arg);
     auto* self = params->self;
+    self->pending_prefetch_params_ = nullptr;
     std::string work_id = std::move(params->work_id);
     std::vector<AudioInfo> audios = std::move(params->audios);
     bool restart = params->restart;
