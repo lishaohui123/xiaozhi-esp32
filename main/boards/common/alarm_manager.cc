@@ -2482,8 +2482,8 @@ void AlarmManager::TriggerAlarm(const AlarmInfo& alarm) {
         repeat = 3;
     } else {
     // 向后端获取提示语
-        alarm_msg = GetTips(alarm.tip_template_id);
-        repeat = alarm_msg.size() < 15 ? 3 : 1;
+        alarm_msg = "小主人，" + GetTips(alarm.tip_template_id);
+        repeat = 3;
     }
     size_t mem_b = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     ESP_LOGI("MEMLEAK", "[TriggerAlarm] A=%d B=%d dA-B=%d", mem_a, mem_b, mem_a - mem_b);
