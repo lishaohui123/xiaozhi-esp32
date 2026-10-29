@@ -1168,7 +1168,7 @@ void Esp32Music::PlayAudiosImpl(const std::string& work_id, std::vector<AudioInf
     is_play_audios_status_ = 0;
 
     // 故事讲完后，恢复待命的表情
-    if (Application::GetInstance().wifiStatus_) {
+    if (Board::GetInstance().GetMusic()->IsWorkPlaying() == 0 && Board::GetInstance().GetMusic()->IsAudioPlaying() == 0 && !VoiceCall::get_instance()->is_call_status_  && Application::GetInstance().wifiStatus_) {  // 当正在播放故事时，不进行睡眠模式
         Board::GetInstance().GetDisplay()->SetEmotion("sleep");
     }
 }
@@ -1767,7 +1767,7 @@ void Esp32Music::PlayAudioImpl(const std::string &music_url) {
     is_play_audio_status_ = 0;
 
     // 故事讲完后，恢复待命的表情
-    if (Application::GetInstance().wifiStatus_) {
+    if (Board::GetInstance().GetMusic()->IsWorkPlaying() == 0 && Board::GetInstance().GetMusic()->IsAudioPlaying() == 0 && !VoiceCall::get_instance()->is_call_status_  && Application::GetInstance().wifiStatus_) {  // 当正在播放故事时，不进行睡眠模式
         Board::GetInstance().GetDisplay()->SetEmotion("sleep");
     }
 }
