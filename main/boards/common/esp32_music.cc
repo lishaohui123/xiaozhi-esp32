@@ -1132,8 +1132,12 @@ void Esp32Music::PlayAudiosImpl(const std::string& work_id, std::vector<AudioInf
             }
 
             ESP_LOGI(TAG, "播放音频: %s", audio_infos.at(i).play_url.c_str());
-            StartStreaming(audio_infos.at(i).play_url);         // 已经改为同步函数
 
+            if (!StartStreaming(audio_infos.at(i).play_url)) {         // 已经改为同步函数
+                // wifi断掉的情况下，停止音频的继续播放
+                break;
+            }
+            
             // 其他中断线程修改了状态位
             if (is_play_audios_status_ == 0) {
                 break;
@@ -1164,7 +1168,9 @@ void Esp32Music::PlayAudiosImpl(const std::string& work_id, std::vector<AudioInf
     is_play_audios_status_ = 0;
 
     // 故事讲完后，恢复待命的表情
-    Board::GetInstance().GetDisplay()->SetEmotion("sleep");
+    if (Application::GetInstance().wifiStatus_) {
+        Board::GetInstance().GetDisplay()->SetEmotion("sleep");
+    }
 }
 
 /****************************************
@@ -1761,7 +1767,9 @@ void Esp32Music::PlayAudioImpl(const std::string &music_url) {
     is_play_audio_status_ = 0;
 
     // 故事讲完后，恢复待命的表情
-    Board::GetInstance().GetDisplay()->SetEmotion("sleep");
+    if (Application::GetInstance().wifiStatus_) {
+        Board::GetInstance().GetDisplay()->SetEmotion("sleep");
+    }
 }
 
 bool Esp32Music::Play() {
@@ -2070,8 +2078,14 @@ bool Esp32Music::StartStreaming(const std::string& music_url) {
         ClearAudioBuffer();
     }
 
-    ESP_LOGI(TAG, "Streaming play successfully");
-    return true;
+    // 应对wifi断开的问题
+    if (Application::GetInstance().wifiStatus_) {
+        ESP_LOGI(TAG, "Streaming play successfully");
+        return true;
+    } else {
+        ESP_LOGI(TAG, "Streaming play failed, wifi disconnected");
+        return false;
+    }
 }
 
 /******************************************

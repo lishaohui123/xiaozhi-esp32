@@ -173,6 +173,11 @@ public:
 
     VoiceCall* voice_call_;
 #endif
+
+    bool isInitWifi_ = true;
+
+    bool wifiStatus_ = true;
+    
 private:
     Application();
     ~Application();

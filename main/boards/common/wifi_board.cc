@@ -115,7 +115,19 @@ void WifiBoard::OnNetworkEvent(NetworkEvent event, const std::string& data) {
 #endif
             in_config_mode_ = false;
             ESP_LOGI(TAG, "Connected to WiFi: %s", data.c_str());
-            Board::GetInstance().GetDisplay()->SetEmotion("start");
+            if (Application::GetInstance().isInitWifi_) {
+                Application::GetInstance().isInitWifi_ = false;
+                Board::GetInstance().GetDisplay()->SetEmotion("start");
+            } else {
+                // 为了应对电话期间，wifi闪断的情况
+                if (VoiceCall::get_instance()->is_call_status_) {
+                    Board::GetInstance().GetDisplay()->SetEmotion("call");
+                }
+                else {
+                    Board::GetInstance().GetDisplay()->SetEmotion("neutral");
+                }
+            }
+            Application::GetInstance().wifiStatus_ = true;
             break;
         case NetworkEvent::Scanning:
             ESP_LOGI(TAG, "WiFi scanning");
@@ -126,6 +138,9 @@ void WifiBoard::OnNetworkEvent(NetworkEvent event, const std::string& data) {
             break;
         case NetworkEvent::Disconnected:
             ESP_LOGW(TAG, "WiFi disconnected");
+            Application::GetInstance().wifiStatus_ = false;
+            Board::GetInstance().GetDisplay()->SetEmotion("wifi");
+            Application::GetInstance().Alert(Lang::Strings::ERROR, "", "circle_xmark", Lang::Sounds::OGG_EXCLAMATION);
             break;
         case NetworkEvent::WifiConfigModeEnter:
             ESP_LOGI(TAG, "WiFi config mode entered");

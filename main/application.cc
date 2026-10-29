@@ -264,6 +264,7 @@ void Application::Initialize() {
     // display->UpdateStatusBar(true);
 
     isInit_ = true;
+    isInitWifi_ = true;
 }
 
 void Application::Run() {
@@ -1112,7 +1113,7 @@ void Application::InitializeProtocol() {
             auto emotion = cJSON_GetObjectItem(root, "emotion");
             if (cJSON_IsString(emotion)) {
                 Schedule([this, display, emotion_str = std::string(emotion->valuestring)]() {
-                    if (!VoiceCall::get_instance()->is_call_status_) {
+                    if (!VoiceCall::get_instance()->is_call_status_ && wifiStatus_) {
                         display->SetEmotion(emotion_str.c_str());
                     }
                 });
@@ -1198,7 +1199,7 @@ void Application::Alert(const char* status, const char* message, const char* emo
     ESP_LOGW(TAG, "Alert [%s] %s: %s", emotion, status, message);
     auto display = Board::GetInstance().GetDisplay();
     // display->SetStatus(status);
-    display->SetEmotion(emotion);
+    // display->SetEmotion(emotion);
     // display->SetChatMessage("system", message);
     if (!sound.empty()) {
         audio_service_.PlaySound(sound);
@@ -1395,13 +1396,13 @@ void Application::HandleStateChangedEvent() {
 
             if (CanEnterSleepMode() == true && isInit_ == false) {
                 auto music = board.GetMusic();
-                if (music->IsWorkPlaying() == 0 && music->IsAudioPlaying() == 0 && !VoiceCall::get_instance()->is_call_status_) {  // 当正在播放故事时，不进行睡眠模式
+                if (music->IsWorkPlaying() == 0 && music->IsAudioPlaying() == 0 && !VoiceCall::get_instance()->is_call_status_  && wifiStatus_) {  // 当正在播放故事时，不进行睡眠模式
                     board.GetDisplay()->SetEmotion("sleep");
                 }
             } else {
                 isInit_ = false;
                 auto music = board.GetMusic();
-                if (music->IsWorkPlaying() == 0 && music->IsAudioPlaying() == 0 && !VoiceCall::get_instance()->is_call_status_) {  // 当正在播放故事时，不进行睡眠模式
+                if (music->IsWorkPlaying() == 0 && music->IsAudioPlaying() == 0 && !VoiceCall::get_instance()->is_call_status_ && wifiStatus_) {  // 当正在播放故事时，不进行睡眠模式
                     board.GetDisplay()->SetEmotion("neutral");
                 }
             }
@@ -1423,7 +1424,7 @@ void Application::HandleStateChangedEvent() {
             audio_service_.EnableWakeWordDetection(false);
             break;
         case kDeviceStateListening:
-            if (!VoiceCall::get_instance()->is_call_status_) {
+            if (!VoiceCall::get_instance()->is_call_status_ && wifiStatus_) {
                 // display->SetStatus(Lang::Strings::LISTENING);
                 display->SetEmotion("neutral");
             }

@@ -1625,7 +1625,12 @@ bool VoiceCall::send_audio_frame(int sockfd, uint32_t sample_rate, uint8_t  chan
 
     // memcpy(header.token, m_call_info.roomToken.c_str(), m_call_info.roomToken.size());
 
-    return send_packet(sockfd, &header, audio_data, audio_size);
+    // 应对wifi断开的情况
+    if (Application::GetInstance().wifiStatus_) {
+        return send_packet(sockfd, &header, audio_data, audio_size);
+    } else {
+        return false;
+    }
 }
 
 bool VoiceCall::send_packet(int sockfd, const CustomHeader* header, const uint8_t* rtp_data, int data_len) {
