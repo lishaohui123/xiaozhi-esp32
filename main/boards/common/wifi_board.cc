@@ -126,6 +126,7 @@ void WifiBoard::OnNetworkEvent(NetworkEvent event, const std::string& data) {
                 else {
                     Board::GetInstance().GetDisplay()->SetEmotion("neutral");
                 }
+                Application::GetInstance().Alert(Lang::Strings::CONNECTED_TO, "", "cloud_arrow_down", Lang::Sounds::OGG_SUCCESS);
             }
             Application::GetInstance().wifiStatus_ = true;
             break;
