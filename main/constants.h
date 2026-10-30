@@ -45,7 +45,7 @@
 
 
 #define PRODUCT "baobaolong"
-#define SUB_PRODUCT "yanyan"
+#define SUB_PRODUCT "sasa"
 #endif
 
 extern std::string blue_device;

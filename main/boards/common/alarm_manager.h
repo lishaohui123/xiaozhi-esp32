@@ -111,7 +111,7 @@ private:
     AlarmClient& alarm_client_;
     
     // 静态alarm_trigger_task任务分配相关成员
-    static constexpr uint32_t ALARM_TRIGGER_TASK_STACK_SIZE = 1024 * 4;  // 4KB栈空间
+    static constexpr uint32_t ALARM_TRIGGER_TASK_STACK_SIZE = 1024 * 16; // 16KB栈空间
     static constexpr uint32_t ALARM_WRITE_TASK_STACK_SIZE = 1024 * 12;   // 12KB栈空间
     StackType_t* alarm_trigger_task_stack_;                    // 任务栈指针
     StaticTask_t* alarm_trigger_task_tcb_;                     // 任务控制块指针
