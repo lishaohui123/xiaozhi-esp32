@@ -248,7 +248,7 @@ private:
     std::condition_variable buffer_cv_;
     std::atomic<long> buffer_size_;
     static constexpr size_t MAX_BUFFER_SIZE = 512 * 1024;  // 512KB缓冲区
-    static constexpr size_t MIN_BUFFER_SIZE = 1 * 1024;   // 64KB最小播放缓冲
+    static constexpr size_t MIN_BUFFER_SIZE = 1 * 1024;   // 起播 MP3 输入缓冲阈值
     
     // MP3解码器相关
     HMP3Decoder mp3_decoder_;

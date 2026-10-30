@@ -1630,6 +1630,7 @@ void Esp32Music::RequestStopCurrentStreaming() {
     // 只“请求”当前播报干净退出：设置停止标志、关闭连接并唤醒等待中的任务。
     // 不在这里删除任务句柄；任务由正在运行的旧会话在自己的收尾阶段删除，
     // 避免两个线程同时 vTaskDelete 同一个任务句柄。
+    bool had_active_stream = is_downloading_.load() || is_playing_.load();
     playback_stop_requested_ = true;
     is_state_completed_ = 2;
     prompt_playback_mode_ = false;
@@ -1638,7 +1639,10 @@ void Esp32Music::RequestStopCurrentStreaming() {
     is_downloading_ = false;
     is_playing_ = false;
 
-    CloseStreamingHttpClient();
+    // 只有确实正在下载/播放时才关闭连接；空闲时保留连接供下次触摸复用。
+    if (had_active_stream) {
+        CloseStreamingHttpClient();
+    }
 
     {
         std::lock_guard<std::mutex> lock(buffer_mutex_);
@@ -3137,7 +3141,7 @@ void Esp32Music::PlayAudioStream() {
             }
 
             // 如果需要更多MP3数据，从缓冲区读取
-            if (bytes_left < 4096) {
+            if (bytes_left < MIN_BUFFER_SIZE) {
                 total_buffer_fetches++;
                 
                 AudioChunk chunk;
