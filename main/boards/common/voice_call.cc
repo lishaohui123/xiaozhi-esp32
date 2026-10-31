@@ -1247,13 +1247,13 @@ void VoiceCall::handle_device_set(const char* payload) {
 * 进行固件的自动升级
 *********************************************/
 void VoiceCall::handle_device_update(const char* payload) {
-    if ((kDeviceStateIdle == Application::GetInstance().GetDeviceState()) && (Application::GetInstance().GetAudioService().is_voice_out_ == false)) {
+    if (Application::GetInstance().GetAudioService().is_voice_out_ == false) {
         Application::GetInstance().UpdateFirmwareTask();
     }
     else {
         ESP_LOGI(TAG, "忽略此次升级指令");
 
-        std::string s = "小主人，升级系统只能在待命状态下执行噢，请在重试一次吧！";
+        std::string s = "小主人，现在不能升级噢，请一会在重试一次吧！";
         auto& alarm_manager = AlarmManager::GetInstance();
         alarm_manager.PlayTtsAudioStreamVoice(s, 1);
     }

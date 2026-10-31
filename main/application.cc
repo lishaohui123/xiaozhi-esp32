@@ -693,7 +693,7 @@ void Application::UpdateFirmwareTask() {
 
 void Application::UpdateFirmware(void *arg) {
     // 正常对话时、电话时、播放故事时，都不触发的
-    if ((kDeviceStateIdle == GetDeviceState()) && (Application::GetInstance().GetAudioService().is_voice_out_ == false)) {
+    if (Application::GetInstance().GetAudioService().is_voice_out_ == false) {
         Application* application = static_cast<Application*>(arg);
 
         application->ota_->CheckVersion();
