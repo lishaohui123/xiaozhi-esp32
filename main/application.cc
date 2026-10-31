@@ -26,6 +26,7 @@
 #include <driver/gpio.h>
 #include <arpa/inet.h>
 #include <font_awesome.h>
+#include <esp_lvgl_port.h>
 
 #define TAG "Application"
 
@@ -699,6 +700,7 @@ void Application::UpdateFirmware(void *arg) {
         application->ota_->CheckVersion();
 
         if (application->ota_->HasNewVersion()) {
+            isUpdate_ = true;
             Board::GetInstance().GetDisplay()->SetEmotion("update");
           
             ESP_LOGI(TAG, "正在进行升级。%s %s", application->ota_->GetFirmwareUrl().c_str(),application->ota_->GetFirmwareVersion().c_str());
@@ -713,8 +715,10 @@ void Application::UpdateFirmware(void *arg) {
                 auto& alarm_manager = AlarmManager::GetInstance();
                 alarm_manager.PlayTtsAudioStreamVoice(s, 1);
     #endif
+                isUpdate_ = false;
                 return; // This line will never be reached after reboot
             }
+            isUpdate_ = false;
         }
         else {
             std::string s = "小主人，目前设备已经是最新版本了。";
@@ -1396,13 +1400,13 @@ void Application::HandleStateChangedEvent() {
 
             if (CanEnterSleepMode() == true && isInit_ == false) {
                 auto music = board.GetMusic();
-                if (music->IsWorkPlaying() == 0 && music->IsAudioPlaying() == 0 && !VoiceCall::get_instance()->is_call_status_  && wifiStatus_) {  // 当正在播放故事时，不进行睡眠模式
+                if (music->IsWorkPlaying() == 0 && music->IsAudioPlaying() == 0 && !VoiceCall::get_instance()->is_call_status_  && wifiStatus_ && !isUpdate_) {  // 当正在播放故事时，不进行睡眠模式
                     board.GetDisplay()->SetEmotion("sleep");
                 }
             } else {
                 isInit_ = false;
                 auto music = board.GetMusic();
-                if (music->IsWorkPlaying() == 0 && music->IsAudioPlaying() == 0 && !VoiceCall::get_instance()->is_call_status_ && wifiStatus_) {  // 当正在播放故事时，不进行睡眠模式
+                if (music->IsWorkPlaying() == 0 && music->IsAudioPlaying() == 0 && !VoiceCall::get_instance()->is_call_status_ && wifiStatus_ && !isUpdate_) {  // 当正在播放故事时，不进行睡眠模式
                     board.GetDisplay()->SetEmotion("neutral");
                 }
             }
@@ -1560,16 +1564,18 @@ bool Application::UpgradeFirmware(const std::string& url, const std::string& ver
     audio_service_.Stop();
     vTaskDelay(pdMS_TO_TICKS(1000));
 
-    bool upgrade_success = Ota::Upgrade(upgrade_url, [this, display](int progress, size_t speed) {
-        char buffer[32];
-        snprintf(buffer, sizeof(buffer), "%d%% %uKB/s", progress, speed / 1024);
-        Schedule([display, message = std::string(buffer)]() {
-            //display->SetChatMessage("system", message.c_str());
-        });
+    // OTA 写 Flash 期间会冻结 cache，LVGL/GIF 等其他任务继续访问 PSRAM 或
+    // flash 映射代码会触发 MMU entry fault。先暂停 LVGL 渲染。
+    lvgl_port_stop();
+
+    // 下载进度已由 Ota::Upgrade 输出日志；这里不更新 LVGL，避免在写
+    // Flash 时再次唤醒 LVGL 任务。
+    bool upgrade_success = Ota::Upgrade(upgrade_url, [](int progress, size_t speed) {
     });
 
     if (!upgrade_success) {
         // Upgrade failed, restart audio service and continue running
+        lvgl_port_resume();
         ESP_LOGE(TAG, "Firmware upgrade failed, restarting audio service and continuing operation...");
         audio_service_.Start(); // Restart audio service
         board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER); // Restore power save level

@@ -177,6 +177,8 @@ public:
     bool isInitWifi_ = true;
 
     bool wifiStatus_ = true;
+
+    bool isUpdate_ = false;
     
 private:
     Application();
